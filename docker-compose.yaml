@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:16
+    container_name: umd_events_db
+    environment:
+      POSTGRES_DB: umd_events
+      POSTGRES_USER: umd_user
+      POSTGRES_PASSWORD: umd_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  loader:
+    build: .
+    container_name: umd_events_loader
+    depends_on:
+      - db
+    environment:
+      POSTGRES_DB: umd_events
+      POSTGRES_USER: umd_user
+      POSTGRES_PASSWORD: umd_password
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      # Optional override if you ever rename the file:
+      # EVENTS_JSON_NAME: "some_other_file.json"
+    volumes:
+      - .:/app
+
+volumes:
+  db_data:
