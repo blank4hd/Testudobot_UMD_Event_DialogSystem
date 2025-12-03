@@ -1,18 +1,20 @@
 # app.py
 
 import os
+import re
 from typing import List, Tuple, Dict, Optional
 
 import numpy as np
 import psycopg2
 from psycopg2.extras import DictCursor
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 from groq import Groq
 import streamlit as st
 from dotenv import load_dotenv
 
 # --- BERTopic ---
 from bertopic import BERTopic
+from rank_bm25 import BM25Okapi
 
 # Load .env
 load_dotenv()
@@ -35,6 +37,10 @@ EMBEDDING_MODEL_NAME = os.getenv(
     "sentence-transformers/all-MiniLM-L6-v2"
 )
 
+CROSS_ENCODER_MODEL_NAME = os.getenv(
+    "CROSS_ENCODER_MODEL_NAME",
+    "cross-encoder/ms-marco-MiniLM-L-6-v2"
+)
 
 # ============================
 #  DATABASE HELPERS
@@ -50,6 +56,7 @@ def get_db_connection():
         port=DB_PORT,
     )
     return conn
+
 
 def init_db():
     """
@@ -81,6 +88,7 @@ def init_db():
     finally:
         conn.close()
 
+
 def fetch_all_events() -> List[dict]:
     """Load ALL events, including their assigned topic_id."""
     conn = get_db_connection()
@@ -98,6 +106,7 @@ def fetch_all_events() -> List[dict]:
     finally:
         conn.close()
 
+
 def fetch_topic_map() -> Dict[int, str]:
     """Returns a dict mapping topic_id -> Label (e.g. {0: 'Career Fair', 1: 'Music'})"""
     conn = get_db_connection()
@@ -110,6 +119,7 @@ def fetch_topic_map() -> Dict[int, str]:
         return {}
     finally:
         conn.close()
+
 
 def update_event_topics(event_ids: List[int], topic_ids: List[int]):
     """Bulk update topic_ids in the main events table."""
@@ -124,6 +134,7 @@ def update_event_topics(event_ids: List[int], topic_ids: List[int]):
         conn.commit()
     finally:
         conn.close()
+
 
 def save_topic_labels(topic_data: List[dict]):
     """Save the AI-generated labels to the topic_labels table."""
@@ -147,18 +158,31 @@ def save_topic_labels(topic_data: List[dict]):
 
 
 # ============================
-#  ML / EMBEDDING
+#  ML / EMBEDDING / INDEXES
 # ============================
 
 @st.cache_resource
 def get_embedding_model() -> SentenceTransformer:
     return SentenceTransformer(EMBEDDING_MODEL_NAME)
 
+
+@st.cache_resource
+def get_cross_encoder() -> CrossEncoder:
+    return CrossEncoder(CROSS_ENCODER_MODEL_NAME)
+
+
 @st.cache_resource
 def get_groq_client() -> Groq:
     return Groq(api_key=GROQ_API_KEY)
 
+
 def build_event_text(ev: dict) -> str:
+    """
+    Single representation used by:
+      - dense embeddings
+      - BM25 keyword search
+      - Cross-Encoder re-ranking
+    """
     parts = [
         ev.get("event") or "",
         f"Date: {ev.get('date')}",
@@ -168,10 +192,11 @@ def build_event_text(ev: dict) -> str:
     ]
     return " ".join(p.strip() for p in parts if p)
 
-@st.cache_resource(show_spinner="Building semantic index...")
+
+@st.cache_resource(show_spinner="Building semantic (vector) index...")
 def build_semantic_index() -> Tuple[List[dict], np.ndarray]:
     """
-    Fetch events and build/cache embeddings.
+    Fetch events and build/cache vector embeddings.
     """
     events = fetch_all_events()
     if not events:
@@ -183,6 +208,28 @@ def build_semantic_index() -> Tuple[List[dict], np.ndarray]:
     embeddings = np.array(embeddings, dtype="float32")
 
     return events, embeddings
+
+
+def _tokenize(text: str) -> List[str]:
+    """
+    Simple tokenizer for BM25: lowercase alphanumeric tokens.
+    """
+    return re.findall(r"\w+", (text or "").lower())
+
+
+@st.cache_resource(show_spinner="Building BM25 keyword index...")
+def build_bm25_index() -> Tuple[List[dict], Optional[BM25Okapi]]:
+    """
+    Build BM25 index over the same event texts used for embeddings.
+    """
+    events = fetch_all_events()
+    if not events:
+        return [], None
+
+    texts = [build_event_text(ev) for ev in events]
+    tokenized_corpus = [_tokenize(t) for t in texts]
+    bm25 = BM25Okapi(tokenized_corpus)
+    return events, bm25
 
 
 # ============================
@@ -207,6 +254,7 @@ def generate_topic_label(keywords: List[str]) -> str:
         return resp.choices[0].message.content.strip().replace('"', '')
     except:
         return "General Events"
+
 
 def run_pipeline_and_save_topics():
     """
@@ -235,7 +283,7 @@ def run_pipeline_and_save_topics():
     
     for index, row in topic_info.iterrows():
         tid = row['Topic']
-        if tid != -1: # Skip noise
+        if tid != -1:  # Skip noise
             keywords = [x[0] for x in topic_model.get_topic(tid)[:5]]
             label = generate_topic_label(keywords)
             structured_topics.append({
@@ -247,43 +295,101 @@ def run_pipeline_and_save_topics():
     # 4. Save Labels to DB
     save_topic_labels(structured_topics)
     
-    # Clear cache so next search picks up new topics
+    # Clear caches so next search picks up new topics & indexes
     build_semantic_index.clear()
+    build_bm25_index.clear()
     
     return f"Successfully processed {len(structured_topics)} topics and updated database."
 
 
 # ============================
-#  SEARCH & RAG
+#  HYBRID SEARCH (BM25 + Dense + RRF + Cross-Encoder)
 # ============================
 
-def semantic_search(query: str, top_k: int = 5, filter_topic_id: Optional[int] = None) -> List[Tuple[dict, float]]:
+def semantic_search(
+    query: str,
+    top_k: int = 5,
+    filter_topic_id: Optional[int] = None
+) -> List[Tuple[dict, float]]:
     """
-    Search with optional Topic Filtering.
+    Hybrid search with topic filtering:
+      1. Dense vector search -> top 50
+      2. BM25 keyword search -> top 50
+      3. Reciprocal Rank Fusion (RRF) to fuse rankings
+      4. Cross-Encoder re-ranking for final top_k
     """
-    events, emb_matrix = build_semantic_index()
-    if not events: 
+    # --- Load indexes ---
+    events_dense, emb_matrix = build_semantic_index()
+    events_bm25, bm25 = build_bm25_index()
+
+    if not events_dense or bm25 is None:
         return []
 
+    # We assume fetch_all_events() returns the same ordering everywhere (ORDER BY id)
+    assert len(events_dense) == len(events_bm25)
+    events = events_dense
+    N = len(events)
+
+    # --- Dense retrieval ---
     model = get_embedding_model()
     q_emb = model.encode([query], normalize_embeddings=True)[0].astype("float32")
+    dense_scores = emb_matrix @ q_emb  # (N,)
 
-    scores = emb_matrix @ q_emb
-    
-    scored_events = []
-    for idx, ev in enumerate(events):
-        scored_events.append((ev, float(scores[idx])))
+    k_dense = min(50, N)
+    dense_rank_indices = np.argsort(-dense_scores)[:k_dense]
 
-    # Apply Filtering if requested
-    if filter_topic_id is not None:
-        scored_events = [
-            (ev, s) for (ev, s) in scored_events 
-            if ev.get('topic_id') == filter_topic_id
-        ]
+    # --- BM25 retrieval ---
+    q_tokens = _tokenize(query)
+    bm25_scores = bm25.get_scores(q_tokens)  # (N,)
+    k_bm25 = min(50, N)
+    bm25_rank_indices = np.argsort(-bm25_scores)[:k_bm25]
 
-    scored_events.sort(key=lambda x: x[1], reverse=True)
+    # --- Reciprocal Rank Fusion (RRF) ---
+    K = 60.0  # standard constant for RRF
+    rrf_scores: Dict[int, float] = {}
 
-    return scored_events[:top_k]
+    def add_rrf(indices: np.ndarray):
+        for rank, idx in enumerate(indices):
+            rrf_scores[idx] = rrf_scores.get(idx, 0.0) + 1.0 / (K + rank + 1.0)
+
+    add_rrf(dense_rank_indices)
+    add_rrf(bm25_rank_indices)
+
+    if not rrf_scores:
+        return []
+
+    fused_indices = sorted(rrf_scores.keys(), key=lambda i: rrf_scores[i], reverse=True)
+
+    # --- Cross-Encoder re-ranking on fused candidates ---
+    cross_encoder = get_cross_encoder()
+    docs_texts = [build_event_text(ev) for ev in events]
+
+    candidate_pairs = [(query, docs_texts[idx]) for idx in fused_indices]
+    ce_scores = cross_encoder.predict(candidate_pairs)  # list/np of scores
+
+    # Combine indices with CE scores
+    ranked: List[Tuple[dict, float]] = []
+    for idx, score in sorted(
+        zip(fused_indices, ce_scores),
+        key=lambda x: x[1],
+        reverse=True
+    ):
+        ev = events[idx]
+
+        # Optional topic filter
+        if filter_topic_id is not None and ev.get("topic_id") != filter_topic_id:
+            continue
+
+        ranked.append((ev, float(score)))
+        if len(ranked) >= top_k:
+            break
+
+    return ranked
+
+
+# ============================
+#  RAG ANSWERING
+# ============================
 
 def call_groq_rag(query, retrieved_events, history):
     client = get_groq_client()
@@ -366,13 +472,13 @@ with st.sidebar:
     st.divider()
     st.header("Admin Controls")
     
-    # FIXED: Replaced mojibake with Brain emoji
+    # Topic modeling pipeline trigger
     if st.button("🧠 Analyze & Save Topics"):
         with st.spinner("Clustering events, generating labels, and saving to DB..."):
             msg = run_pipeline_and_save_topics()
-            st.success(msg)
-            # Force reload to update sidebar
-            st.rerun()
+        st.success(msg)
+        # Force reload to update sidebar
+        st.rerun()
 
 # Chat Interface
 for msg in st.session_state.messages:
@@ -383,7 +489,7 @@ if prompt := st.chat_input("Ask about events..."):
     st.chat_message("user").write(prompt)
 
     with st.spinner("Searching..."):
-        # 1. Search with Filter
+        # 1. Hybrid Search with Filter
         results = semantic_search(prompt, top_k=top_k, filter_topic_id=filter_id)
         
         # 2. Generate Answer
@@ -396,6 +502,8 @@ if prompt := st.chat_input("Ask about events..."):
                 with st.expander("See Sources"):
                     for ev, score in results:
                         st.markdown(f"**{ev['event']}** ({score:.2f})")
-                        st.caption(f"Topic: {available_topics.get(ev.get('topic_id'), 'Uncategorized')}")
+                        st.caption(
+                            f"Topic: {available_topics.get(ev.get('topic_id'), 'Uncategorized')}"
+                        )
 
     st.session_state.messages.append({"role": "assistant", "content": answer})

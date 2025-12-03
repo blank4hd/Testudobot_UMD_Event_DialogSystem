@@ -1,8 +1,36 @@
-psycopg2-binary
-streamlit
-groq
-sentence-transformers
-numpy
-python-dotenv
-scikit-learn
 bertopic
+rank-bm25
+# --- Core App Dependencies ---
+streamlit
+python-dotenv
+psycopg2-binary
+groq
+requests
+numpy
+pandas
+
+# --- Embeddings ---
+sentence-transformers
+
+# --- RAG Evaluation ---
+datasets>=2.14.0
+ragas>=0.1.0
+
+# ragas dependency: requires langchain community support
+langchain
+langchain-community
+langchain-core
+
+# Optional (but recommended for RAGAS LLM support)
+openai
+
+# --- Metrics for Generator Evaluation ---
+bert-score
+rouge-score
+
+# --- Web scraping (if needed for ingestion) ---
+beautifulsoup4
+tqdm
+
+# --- Utility ---
+scikit-learn
