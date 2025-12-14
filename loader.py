@@ -6,11 +6,21 @@ import psycopg2
 from psycopg2 import OperationalError
 from sentence_transformers import SentenceTransformer
 import numpy as np
+from elasticsearch import Elasticsearch, helpers
+import logging
 
-# Flush prints for Docker
+# ============================
+#  LOGGING SETUP
+# ============================
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 def print_flush(msg):
-    print(msg)
-    sys.stdout.flush()
+    logger.info(msg)
+
+# ============================
+#  DATA LOADING HELPERS
+# ============================
 
 def load_events_from_json(path: str):
     print_flush(f"🔎 Looking for JSON at: {path}")
@@ -26,7 +36,12 @@ def load_events_from_json(path: str):
     print_flush(f"✅ Loaded {len(data)} events from JSON.")
     return data
 
-def get_pg_connection_with_retry(max_attempts: int = 20, delay_sec: float = 2.0):
+# ============================
+#  CONNECTION HELPERS (ROBUST)
+# ============================
+
+def get_pg_connection_with_retry(max_attempts: int = 20, delay_sec: float = 3.0):
+    """Waits for Postgres to be ready."""
     dbname = os.getenv("POSTGRES_DB", "umd_events")
     user = os.getenv("POSTGRES_USER", "umd_user")
     password = os.getenv("POSTGRES_PASSWORD", "umd_password")
@@ -36,185 +51,198 @@ def get_pg_connection_with_retry(max_attempts: int = 20, delay_sec: float = 2.0)
     for attempt in range(1, max_attempts + 1):
         try:
             conn = psycopg2.connect(
-                dbname=dbname,
-                user=user,
-                password=password,
-                host=host,
-                port=port,
+                dbname=dbname, user=user, password=password, host=host, port=port
             )
             print_flush(f"✅ Connected to Postgres on attempt {attempt}")
             return conn
-        except OperationalError as e:
-            print_flush(
-                f"⏳ Postgres not ready yet (attempt {attempt}/{max_attempts}): "
-                f"{e.__class__.__name__}: {e}"
-            )
-            if attempt == max_attempts:
-                print_flush("❌ Giving up connecting to Postgres.")
-                raise
+        except OperationalError:
+            print_flush(f"⏳ Postgres not ready (attempt {attempt}/{max_attempts})...")
             time.sleep(delay_sec)
+    
+    raise Exception("❌ Could not connect to Postgres after multiple attempts.")
 
-def load_to_postgres(events):
+def get_es_client_with_retry(max_attempts: int = 20, delay_sec: float = 5.0):
+    """Waits for Elasticsearch to be ready (CRITICAL FIX)."""
+    es_host = os.getenv("ELASTIC_HOST", "http://elasticsearch:9200")
+    es = Elasticsearch(es_host)
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            if es.ping():
+                print_flush(f"✅ Connected to Elasticsearch on attempt {attempt}")
+                return es
+            else:
+                print_flush(f"⏳ Elasticsearch reachable but not ready (attempt {attempt}/{max_attempts})...")
+        except Exception as e:
+            print_flush(f"⏳ Elasticsearch not reachable (attempt {attempt}/{max_attempts}): {e}")
+        
+        time.sleep(delay_sec)
+
+    raise Exception("❌ Could not connect to Elasticsearch after multiple attempts.")
+
+def setup_elasticsearch(es):
+    """Creates the index with specific mappings for Hybrid Search."""
+    index_name = "umd_events"
+    
+    mapping = {
+        "mappings": {
+            "properties": {
+                "event": {"type": "text"},       # BM25 Searchable
+                "description": {"type": "text"}, # BM25 Searchable
+                "date": {"type": "keyword"},
+                "location": {"type": "text"},
+                "topic_id": {"type": "integer"},
+                "embedding": {
+                    "type": "dense_vector",
+                    "dims": 384,                 # Must match MiniLM dimension
+                    "index": True,
+                    "similarity": "cosine"
+                }
+            }
+        }
+    }
+    
+    if es.indices.exists(index=index_name):
+        print_flush("🔄 Recreating ES index...")
+        es.indices.delete(index=index_name)
+    
+    es.indices.create(index=index_name, body=mapping)
+    print_flush("✅ Elasticsearch index 'umd_events' created.")
+
+# ============================
+#  MAIN LOADING LOGIC
+# ============================
+
+def load_data(events):
     if not events:
         print_flush("❌ No events to load. Exiting.")
         return
 
-    print_flush("🔄 Loading embedding model...")
+    # --- 1. Compute Embeddings (ONCE for both DBs) ---
+    print_flush("🔄 Loading embedding model (all-MiniLM-L6-v2)...")
     model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
     
+    print_flush("🔄 Computing embeddings...")
+    # Clean text to avoid newlines breaking things
+    texts = [
+        f"{ev.get('event', '')} {ev.get('description', '')} {ev.get('location', '')}".replace("\n", " ").strip() 
+        for ev in events
+    ]
+    embeddings = model.encode(texts, normalize_embeddings=True).astype('float32')
+    print_flush(f"✅ Computed {len(embeddings)} embeddings.")
+
+    # --- 2. Load into PostgreSQL (Storage & Topics) ---
     conn = get_pg_connection_with_retry()
     conn.autocommit = True
     cur = conn.cursor()
 
-    # Step 1: Check and create pgvector extension
+    # Step A: Check and create pgvector extension
     print_flush("🔄 Checking pgvector extension...")
     try:
-        cur.execute("SELECT * FROM pg_extension WHERE extname = 'vector';")
-        if cur.fetchone():
-            print_flush("✅ pgvector extension already installed.")
-        else:
-            cur.execute("CREATE EXTENSION vector;")
-            print_flush("✅ pgvector extension created.")
+        cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+        print_flush("✅ pgvector extension ensured.")
     except Exception as e:
         print_flush(f"❌ pgvector extension failed: {e}")
-        # If image is wrong, error will propagate
         raise
 
-    # Step 2: Check if table exists and create if not
+    # Step B: Create Table
     print_flush("🔄 Ensuring table schema...")
     try:
-        cur.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'umd_events');")
-        table_exists = cur.fetchone()[0]
-        if not table_exists:
-            cur.execute("""
-                CREATE TABLE umd_events (
-                    id SERIAL PRIMARY KEY,
-                    event TEXT,
-                    date TEXT,
-                    time TEXT,
-                    url TEXT,
-                    location TEXT,
-                    description TEXT,
-                    topic_id INTEGER DEFAULT -1,
-                    embedding VECTOR(384)
-                );
-            """)
-            print_flush("✅ Table created fresh.")
-        else:
-            print_flush("📊 Table already exists; evolving schema...")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS umd_events (
+                id SERIAL PRIMARY KEY,
+                event TEXT,
+                date TEXT,
+                time TEXT,
+                url TEXT,
+                location TEXT,
+                description TEXT,
+                topic_id INTEGER DEFAULT -1,
+                embedding VECTOR(384)
+            );
+        """)
     except Exception as e:
-        print_flush(f"❌ Table check/creation failed: {e}")
+        print_flush(f"❌ Table creation failed: {e}")
         raise
 
-    # Step 3: Evolve schema (add missing columns)
-    force_clean = os.getenv("FORCE_CLEAN_SCHEMA", "true") == "true"
-    try:
-        # Add topic_id
-        cur.execute("""
-            ALTER TABLE umd_events ADD COLUMN IF NOT EXISTS topic_id INTEGER DEFAULT -1;
-        """)
-        print_flush("✅ topic_id column ensured.")
+    # Step C: Optional Clean Slate
+    if os.getenv("FORCE_CLEAN_SCHEMA", "true") == "true":
+        cur.execute("TRUNCATE TABLE umd_events RESTART IDENTITY;")
+        print_flush("🗑️ Cleared existing Postgres data.")
 
-        # Add embedding (depends on vector type)
-        cur.execute("""
-            ALTER TABLE umd_events ADD COLUMN IF NOT EXISTS embedding VECTOR(384);
-        """)
-        print_flush("✅ embedding column ensured.")
-    except Exception as e:
-        print_flush(f"❌ ALTER failed: {e} (likely vector type missing)")
-        if force_clean:
-            print_flush("🔄 Fallback: Dropping table and recreating for clean schema...")
-            cur.execute("DROP TABLE IF EXISTS umd_events CASCADE;")
-            cur.execute("""
-                CREATE TABLE umd_events (
-                    id SERIAL PRIMARY KEY,
-                    event TEXT,
-                    date TEXT,
-                    time TEXT,
-                    url TEXT,
-                    location TEXT,
-                    description TEXT,
-                    topic_id INTEGER DEFAULT -1,
-                    embedding VECTOR(384)
-                );
-            """)
-            print_flush("✅ Table recreated cleanly.")
-        else:
-            raise
-
-    # Step 4: Verify columns (critical check)
-    print_flush("🔄 Verifying schema...")
-    cur.execute("""
-        SELECT column_name, data_type 
-        FROM information_schema.columns 
-        WHERE table_name = 'umd_events' AND column_name IN ('topic_id', 'embedding');
-    """)
-    cols = {row[0]: row[1] for row in cur.fetchall()}
+    # Step D: Insert into Postgres
+    print_flush("🔄 Inserting into Postgres...")
+    pg_ids = []
     
-    # --- FIX 1: Allow 'USER-DEFINED' as a valid type for embedding ---
-    # Postgres usually reports 'vector' as 'USER-DEFINED' in information_schema
-    if 'embedding' not in cols or cols['embedding'] not in ('vector', 'USER-DEFINED'):
-        raise ValueError(f"❌ Critical: embedding column missing or wrong type! Got: {cols}")
-    
-    print_flush(f"✅ Schema verified: topic_id ({cols.get('topic_id')}), embedding ({cols.get('embedding')}).")
-
-    # Step 5: TRUNCATE
-    cur.execute("TRUNCATE TABLE umd_events;")
-    print_flush("🗑️ Old data cleared.")
-
-    # Step 6: Compute embeddings
-    print_flush("🔄 Computing embeddings...")
-    texts = [f"{ev.get('event', '')} {ev.get('date', '')} {ev.get('time', '')} {ev.get('url', '')} {ev.get('location', '')} {ev.get('description', '')}".strip() for ev in events]
-    embeddings = model.encode(texts, normalize_embeddings=True).astype('float32')
-    print_flush(f"✅ Computed {len(embeddings)} embeddings (shape: {embeddings.shape}).")
-
-    # Step 7: Insert (batch-like loop with error per-row)
     insert_sql = """
         INSERT INTO umd_events (event, date, time, url, location, description, topic_id, embedding)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id;
     """
     
-    inserted_count = 0
     for i, ev in enumerate(events):
-        # --- FIX 2: Convert to Python LIST (not bytes) for pgvector ---
-        embedding_list = embeddings[i].tolist()
-        
         try:
             cur.execute(insert_sql, (
-                ev.get("event") or None,
-                ev.get("date") or None,
-                ev.get("time") or None,
-                ev.get("url") or None,
-                ev.get("location") or None,
-                ev.get("description") or None,
-                -1,  # Default
-                embedding_list, # Passing list[float]
+                ev.get("event"), 
+                ev.get("date"), 
+                ev.get("time"), 
+                ev.get("url"), 
+                ev.get("location"), 
+                ev.get("description"), 
+                -1,  # Default topic
+                embeddings[i].tolist(), 
             ))
-            cur.fetchone()  # Consume RETURNING
-            inserted_count += 1
+            pg_id = cur.fetchone()[0]
+            pg_ids.append(pg_id)
         except Exception as e:
-            print_flush(f"❌ Insert failed for event {i+1}: {e}")
-            # Continue to insert others, but raise at end if any failed
-    print_flush(f"📝 Inserted {inserted_count}/{len(events)} rows.")
+            print_flush(f"❌ Postgres insert failed for event {i+1}: {e}")
+            pg_ids.append(None) # Keep index alignment
 
-    if inserted_count != len(events):
-        raise ValueError("Partial insert failure – check logs.")
+    print_flush(f"✅ Inserted {len([x for x in pg_ids if x is not None])} events into Postgres.")
 
-    # Step 8: Create index
+    # Step E: Create Index (Postgres)
     try:
-        cur.execute("DROP INDEX IF EXISTS umd_events_embedding_idx;")
-        cur.execute("""
-            CREATE INDEX umd_events_embedding_idx 
-            ON umd_events USING hnsw (embedding vector_cosine_ops);
-        """)
-        print_flush("🗂️ HNSW index created.")
+        cur.execute("CREATE INDEX IF NOT EXISTS umd_events_embedding_idx ON umd_events USING hnsw (embedding vector_cosine_ops);")
+        print_flush("🗂️ Postgres HNSW index created.")
     except Exception as e:
-        print_flush(f"⚠️ Index creation warning: {e}")
+        print_flush(f"⚠️ Postgres index creation warning: {e}")
 
     cur.close()
     conn.close()
-    print_flush(f"🎉 Loaded {len(events)} events into Postgres with embeddings successfully!")
+
+    # --- 3. Load into Elasticsearch (Search Engine) ---
+    print_flush("🔄 Connecting to Elasticsearch...")
+    # CRITICAL CHANGE: Use the retry function here
+    es = get_es_client_with_retry() 
+    setup_elasticsearch(es)
+    
+    actions = []
+    print_flush("🔄 Preparing Elasticsearch bulk insert...")
+    for i, ev in enumerate(events):
+        if pg_ids[i] is None: continue # Skip if Postgres insert failed
+
+        doc = {
+            "_index": "umd_events",
+            "_id": pg_ids[i], # Link directly to Postgres ID
+            "_source": {
+                "event": ev.get("event"),
+                "date": ev.get("date"),
+                "time": ev.get("time"),
+                "url": ev.get("url"),
+                "location": ev.get("location"),
+                "description": ev.get("description"),
+                "topic_id": -1, 
+                "embedding": embeddings[i].tolist()
+            }
+        }
+        actions.append(doc)
+
+    try:
+        success, _ = helpers.bulk(es, actions)
+        print_flush(f"🎉 Indexed {success} documents in Elastic!")
+    except Exception as e:
+        print_flush(f"❌ Elasticsearch loading failed: {e}")
+        raise
 
 def main():
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -222,8 +250,12 @@ def main():
     json_path = os.path.join(base_dir, json_filename)
     print_flush(f"📂 Loading events from: {json_path}")
 
-    events = load_events_from_json(json_path)
-    load_to_postgres(events)
+    try:
+        events = load_events_from_json(json_path)
+        load_data(events)
+    except Exception as e:
+        print_flush(f"❌ FATAL ERROR: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

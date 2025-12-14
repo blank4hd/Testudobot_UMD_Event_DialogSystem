@@ -1,91 +1,76 @@
 # app.py
+import os
 import json
-import os
-import re
-from typing import List, Tuple, Dict, Optional
+import time
+import logging
+import chainlit as cl
 from datetime import datetime
-import numpy as np
+from typing import List, Dict
+import numpy as np # Helper import for pipeline
 import psycopg2
-from psycopg2.extras import DictCursor
-from sentence_transformers import SentenceTransformer, CrossEncoder
-from groq import Groq
-import streamlit as st
+from sentence_transformers import SentenceTransformer
+from elasticsearch import Elasticsearch
+# from groq import Groq
 from dotenv import load_dotenv
+from openai import OpenAI
+from datasets import Dataset
+from ragas import evaluate
+from ragas.metrics import (
+    context_precision,
+    context_recall,
+    faithfulness,
+    answer_relevancy,
+)
+from langchain_openai import ChatOpenAI
+from langchain_community.embeddings import HuggingFaceEmbeddings
+# --- LOGGING & CONFIG ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# --- BERTopic ---
-from bertopic import BERTopic
-from rank_bm25 import BM25Okapi
-
-# Load .env
 load_dotenv()
-import os
-os.environ['PYTORCH_JIT_LOG_LEVEL'] = '0'  # Suppress torch warning
-# ============================
-#  CONFIG
-# ============================
+os.environ['PYTORCH_JIT_LOG_LEVEL'] = '0'
 
 DB_NAME = os.getenv("DB_NAME", "umd_events")
 DB_USER = os.getenv("DB_USER", "umd_user")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "umd_password")
 DB_HOST = os.getenv("DB_HOST", "db")
-DB_PORT = os.getenv("DB_PORT", "5432")
-
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-
-EMBEDDING_MODEL_NAME = os.getenv(
-    "EMBEDDING_MODEL_NAME",
-    "sentence-transformers/all-MiniLM-L6-v2"
-)
-
-CROSS_ENCODER_MODEL_NAME = os.getenv(
-    "CROSS_ENCODER_MODEL_NAME",
-    "cross-encoder/ms-marco-MiniLM-L-6-v2"
+ELASTIC_HOST = os.getenv("ELASTIC_HOST", "http://elasticsearch:9200")
+# GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+# GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+LLM_MODEL = "google/gemini-3-pro-preview"  # <--- The model you want
+SITE_URL = os.getenv("OR_SITE_URL", "http://localhost:8501")
+SITE_NAME = os.getenv("OR_SITE_NAME", "TestudoBot")
+# --- GLOBAL CLIENTS ---
+# In Chainlit, it's safe to keep these global as they are thread-safe/stateless
+es_client = Elasticsearch(ELASTIC_HOST)
+embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+llm_client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=OPENROUTER_API_KEY,
+    default_headers={
+        "HTTP-Referer": SITE_URL,
+        "X-Title": SITE_NAME,
+    }
 )
 
 # ============================
-#  DATABASE HELPERS
+#  DATABASE & SEARCH LOGIC
 # ============================
 
 def get_db_connection():
-    """Create a new PostgreSQL connection."""
-    conn = psycopg2.connect(
-        dbname=DB_NAME,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        host=DB_HOST,
-        port=DB_PORT,
+    return psycopg2.connect(
+        dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD, host=DB_HOST, port="5432"
     )
-    return conn
-
 
 def init_db():
-    """
-    Ensure the DB schema supports topics and vectors.
-    1. Add topic_id and embedding columns to umd_events if missing.
-    2. Create topic_labels table if missing.
-    3. Enable pgvector extension.
-    4. Create HNSW index for fast vector search (if embeddings exist).
-    """
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            # Enable pgvector extension
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-            
-            # 1. Add topic_id to events table if it doesn't exist
-            cur.execute("""
-                ALTER TABLE umd_events 
-                ADD COLUMN IF NOT EXISTS topic_id INTEGER;
-            """)
-            
-            # 2. Add embedding column (VECTOR(384) for MiniLM)
-            cur.execute("""
-                ALTER TABLE umd_events 
-                ADD COLUMN IF NOT EXISTS embedding VECTOR(384);
-            """)
-            
-            # 3. Create table for topic labels
+            cur.execute("ALTER TABLE umd_events ADD COLUMN IF NOT EXISTS topic_id INTEGER;")
+            cur.execute("ALTER TABLE umd_events ADD COLUMN IF NOT EXISTS embedding VECTOR(384);")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS topic_labels (
                     topic_id INTEGER PRIMARY KEY,
@@ -93,503 +78,426 @@ def init_db():
                     keywords TEXT
                 );
             """)
-            
-            # 4. Create HNSW index for cosine similarity (fast ANN search)
-            # Note: This assumes normalized embeddings; use vector_cosine_ops for exact cosine
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS umd_events_embedding_idx 
                 ON umd_events USING hnsw (embedding vector_cosine_ops);
             """)
-            
         conn.commit()
-        print("✅ DB schema updated with pgvector support.")
     except Exception as e:
-        print(f"DB Init Error: {e}")
+        logger.error(f"DB Init Error: {e}")
         conn.rollback()
     finally:
         conn.close()
 
-
-def fetch_all_events() -> List[dict]:
-    """Load ALL events, including their assigned topic_id."""
-    conn = get_db_connection()
-    try:
-        with conn.cursor(cursor_factory=DictCursor) as cur:
-            cur.execute(
-                """
-                SELECT id, event, date, time, url, location, description, topic_id
-                FROM umd_events
-                ORDER BY id;
-                """
-            )
-            rows = cur.fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
-
-import json  # Ensure this is imported at top of file
-
-# ... existing imports ...
-
-def fetch_events_with_embeddings() -> List[Tuple[dict, np.ndarray]]:
-    """
-    Fetch all events with their embeddings from DB.
-    Fixes: Parses string representations of vectors if pgvector adapter isn't active.
-    """
-    conn = get_db_connection()
-    try:
-        with conn.cursor(cursor_factory=DictCursor) as cur:
-            cur.execute("""
-                SELECT id, event, date, time, url, location, description, topic_id, embedding
-                FROM umd_events
-                ORDER BY id;
-            """)
-            rows = cur.fetchall()
-        
-        results = []
-        zero_emb = np.zeros(384, dtype=np.float32) 
-        
-        for row in rows:
-            ev = dict(row)
-            emb_obj = row['embedding']
-            
-            # 1. Handle None
-            if emb_obj is None:
-                results.append((ev, zero_emb.copy()))
-                continue
-            
-            # 2. Handle String (The fix for your Warnings)
-            # Postgres returns '[0.1, ...]' string if pgvector isn't registered
-            if isinstance(emb_obj, str):
-                try:
-                    # Postgres vector format looks like JSON array: [1,2,3]
-                    parsed_emb = json.loads(emb_obj)
-                    embedding = np.array(parsed_emb, dtype=np.float32)
-                    results.append((ev, embedding))
-                except Exception as e:
-                    print(f"Error parsing string embedding for event {ev['id']}: {e}")
-                    results.append((ev, zero_emb.copy()))
-                continue
-            
-            # 3. Handle Bytes (if binary protocol used)
-            if isinstance(emb_obj, (bytes, bytearray)):
-                embedding = np.frombuffer(emb_obj, dtype=np.float32)
-                results.append((ev, embedding))
-                continue
-
-            # 4. Handle List (if psycopg2 converted it already)
-            if isinstance(emb_obj, list):
-                embedding = np.array(emb_obj, dtype=np.float32)
-                results.append((ev, embedding))
-                continue
-
-            # Fallback
-            results.append((ev, zero_emb.copy()))
-        
-        return results
-    finally:
-        conn.close()
-
-def build_semantic_index() -> Tuple[List[dict], np.ndarray]:
-    """
-    Load events and embeddings from DB.
-    Fixes: Safe normalization to prevent NaN crash.
-    """
-    event_emb_pairs = fetch_events_with_embeddings()
-    if not event_emb_pairs:
-        return [], np.empty((0, 384), dtype="float32")
-
-    # Unzip
-    events = []
-    embeddings_list = []
-    
-    # Filter out pure zero vectors (invalid data) so they don't mess up Topic Modeling
-    for ev, emb in event_emb_pairs:
-        if np.count_nonzero(emb) > 0:
-            events.append(ev)
-            embeddings_list.append(emb)
-            
-    if not events:
-        return [], np.empty((0, 384), dtype="float32")
-
-    embeddings = np.stack(embeddings_list)  # Shape: (N, 384)
-
-    # Safe Normalization (The fix for the Crash)
-    norm = np.linalg.norm(embeddings, axis=1, keepdims=True)
-    
-    # Avoid division by zero: replace 0.0 norms with 1.0
-    # (0 vector / 1.0 is still 0 vector, but it avoids NaN)
-    norm[norm == 0] = 1.0 
-    
-    embeddings = embeddings / norm
-
-    return events, embeddings
-
-def fetch_topic_map() -> Dict[int, str]:
-    """Returns a dict mapping topic_id -> Label (e.g. {0: 'Career Fair', 1: 'Music'})"""
+def fetch_topic_map() -> Dict[str, str]:
+    """Returns { 'Career': '1', 'Music': '2' } for the dropdown."""
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT topic_id, label FROM topic_labels WHERE topic_id != -1 ORDER BY label;")
-            rows = cur.fetchall()
-        return {row[0]: row[1] for row in rows}
+            # Return Label -> ID mapping for the UI
+            return {row[1]: str(row[0]) for row in cur.fetchall()}
     except Exception:
         return {}
     finally:
         conn.close()
 
-
-def update_event_topics(event_ids: List[int], topic_ids: List[int]):
-    """Bulk update topic_ids in the main events table."""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            for eid, tid in zip(event_ids, topic_ids):
-                cur.execute(
-                    "UPDATE umd_events SET topic_id = %s WHERE id = %s;",
-                    (int(tid), int(eid))
-                )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def save_topic_labels(topic_data: List[dict]):
-    """Save the AI-generated labels to the topic_labels table."""
-    conn = get_db_connection()
-    try:
-        with conn.cursor() as cur:
-            # Clear old labels first
-            cur.execute("TRUNCATE TABLE topic_labels;")
-            
-            for t in topic_data:
-                cur.execute(
-                    """
-                    INSERT INTO topic_labels (topic_id, label, keywords)
-                    VALUES (%s, %s, %s);
-                    """,
-                    (t['topic_id'], t['label'], ", ".join(t['keywords']))
-                )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-# ============================
-#  ML / EMBEDDING / INDEXES
-# ============================
-
-@st.cache_resource
-def get_embedding_model() -> SentenceTransformer:
-    return SentenceTransformer(EMBEDDING_MODEL_NAME)
-
-
-@st.cache_resource
-def get_cross_encoder() -> CrossEncoder:
-    return CrossEncoder(CROSS_ENCODER_MODEL_NAME)
-
-
-@st.cache_resource
-def get_groq_client() -> Groq:
-    """
-    Get cached Groq client; minimal init to avoid proxies arg.
-    """
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        raise ValueError("GROQ_API_KEY env var missing. Check .env file.")
+def search_events(query_text, top_k=5, filter_topic_id=None):
+    # 1. Vector Search
+    query_vector = embedding_model.encode(query_text, normalize_embeddings=True).tolist()
     
-    # FIXED: Minimal init (no extra args; SDK 0.4.1+ handles proxies internally)
-    return Groq(api_key=api_key)
-
-
-def build_event_text(ev: dict) -> str:
-    """
-    Single representation used by:
-      - dense embeddings
-      - BM25 keyword search
-      - Cross-Encoder re-ranking
-    """
-    parts = [
-        ev.get("event") or "",
-        f"Date: {ev.get('date')}",
-        f"Time: {ev.get('time')}",
-        ev.get("description") or "",
-        ev.get("location") or ""
-    ]
-    return " ".join(p.strip() for p in parts if p)
-
-
-@st.cache_data(show_spinner="Loading semantic (vector) index from DB...")  # Use cache_data for DB fetches (immutable)
-def build_semantic_index() -> Tuple[List[dict], np.ndarray]:
-    """
-    Load events and embeddings from DB.
-    Fixes: Safe normalization to prevent NaN crash.
-    """
-    event_emb_pairs = fetch_events_with_embeddings()
-    if not event_emb_pairs:
-        return [], np.empty((0, 384), dtype="float32")
-
-    # Unzip
-    events = []
-    embeddings_list = []
-    
-    # Filter out pure zero vectors (invalid data) so they don't mess up Topic Modeling
-    for ev, emb in event_emb_pairs:
-        if np.count_nonzero(emb) > 0:
-            events.append(ev)
-            embeddings_list.append(emb)
-            
-    if not events:
-        return [], np.empty((0, 384), dtype="float32")
-
-    embeddings = np.stack(embeddings_list)  # Shape: (N, 384)
-
-    # Safe Normalization (The fix for the Crash)
-    norm = np.linalg.norm(embeddings, axis=1, keepdims=True)
-    
-    # Avoid division by zero: replace 0.0 norms with 1.0
-    # (0 vector / 1.0 is still 0 vector, but it avoids NaN)
-    norm[norm == 0] = 1.0 
-    
-    embeddings = embeddings / norm
-
-    return events, embeddings
-
-def _tokenize(text: str) -> List[str]:
-    """
-    Simple tokenizer for BM25: lowercase alphanumeric tokens.
-    """
-    return re.findall(r"\w+", (text or "").lower())
-
-
-@st.cache_resource(show_spinner="Building BM25 keyword index...")
-def build_bm25_index() -> Tuple[List[dict], Optional[BM25Okapi]]:
-    """
-    Build BM25 index over the same event texts used for embeddings.
-    """
-    events = fetch_all_events()
-    if not events:
-        return [], None
-
-    texts = [build_event_text(ev) for ev in events]
-    tokenized_corpus = [_tokenize(t) for t in texts]
-    bm25 = BM25Okapi(tokenized_corpus)
-    return events, bm25
-
-
-# ============================
-#  TOPIC MODELING & LLM
-# ============================
-
-def generate_topic_label(keywords: List[str]) -> str:
-    """Asks Groq LLM to name a cluster."""
-    client = get_groq_client()
-    prompt = f"""
-    Keywords: {', '.join(keywords)}.
-    Provide a category name (max 4 words) for this event cluster. 
-    Examples: "Career Services", "Arts & Performance".
-    Return ONLY the name.
-    """
-    try:
-        resp = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=15, temperature=0.3
-        )
-        return resp.choices[0].message.content.strip().replace('"', '')
-    except:
-        return "General Events"
-
-
-def run_pipeline_and_save_topics():
-    """
-    1. Load data & embeddings.
-    2. Run BERTopic.
-    3. Generate Labels via LLM.
-    4. Save EVERYTHING to Postgres.
-    """
-    events, embeddings = build_semantic_index()
-    if len(events) < 5:
-        return "Not enough data to model topics."
-
-    docs = [build_event_text(ev) for ev in events]
-
-    # 1. Run BERTopic
-    topic_model = BERTopic(min_topic_size=3, verbose=True)
-    topics, probs = topic_model.fit_transform(docs, embeddings)
-    
-    # 2. Update Events Table with Topic IDs
-    event_ids = [ev['id'] for ev in events]
-    update_event_topics(event_ids, topics)
-
-    # 3. Generate Labels for discovered topics
-    topic_info = topic_model.get_topic_info()
-    structured_topics = []
-    
-    for index, row in topic_info.iterrows():
-        tid = row['Topic']
-        if tid != -1:  # Skip noise
-            keywords = [x[0] for x in topic_model.get_topic(tid)[:5]]
-            label = generate_topic_label(keywords)
-            structured_topics.append({
-                "topic_id": int(tid),
-                "keywords": keywords,
-                "label": label
-            })
-            
-    # 4. Save Labels to DB
-    save_topic_labels(structured_topics)
-    
-    # Clear caches so next search picks up new topics & indexes
-    build_semantic_index.clear()
-    build_bm25_index.clear()
-    
-    return f"Successfully processed {len(structured_topics)} topics and updated database."
-
-
-# ============================
-#  HYBRID SEARCH (BM25 + Dense + RRF + Cross-Encoder)
-# ============================
-
-def semantic_search(
-    query: str,
-    top_k: int = 5,
-    filter_topic_id: Optional[int] = None
-) -> List[Tuple[dict, float]]:
-    """
-    Hybrid search with pgvector for dense retrieval + topic filtering.
-    Fixed SQL WHERE clause construction for syntax correctness.
-    """
-    # --- Load BM25 index (unchanged) ---
-    events_bm25, bm25 = build_bm25_index()
-    if bm25 is None:
-        return []
-
-    N = len(events_bm25)
-    
-    # --- Dense retrieval with pgvector (FIXED: Robust WHERE/params) ---
-    model = get_embedding_model()
-    q_emb = model.encode([query], normalize_embeddings=True)[0].astype("float32")
-    q_emb_list = q_emb.tolist()
-    
-    # Build conditions dynamically
-    conditions = []
-    params = []
-    
+    filters = []
     if filter_topic_id is not None:
-        conditions.append("topic_id = %s")
-        params.append(filter_topic_id)
+        filters.append({"term": {"topic_id": filter_topic_id}})
+
+    search_body = {
+        "size": top_k,
+        "knn": {
+            "field": "embedding", 
+            "query_vector": query_vector,
+            "k": top_k, 
+            "num_candidates": 50, 
+            "boost": 0.5, 
+            "filter": filters
+        },
+        "query": {
+            "bool": {
+                "must": {
+                    "multi_match": {
+                        "query": query_text, 
+                        "fields": ["event^2", "description", "location"], 
+                        "boost": 0.5
+                    }
+                },
+                "filter": filters
+            }
+        }
+    }
+
+    try:
+        response = es_client.search(index="umd_events", body=search_body)
+        return [(hit['_source'], hit['_score']) for hit in response['hits']['hits']]
+    except Exception as e:
+        logger.error(f"Search failed: {e}")
+        return []
+
+# --- PIPELINE & ADMIN TASKS ---
+
+# def run_pipeline_if_needed():
+#     """Checks for uncategorized events and runs the pipeline."""
+#     conn = get_db_connection()
+#     uncategorized_count = 0
+#     try:
+#         with conn.cursor() as cur:
+#             cur.execute("SELECT COUNT(*) FROM umd_events WHERE topic_id = -1;")
+#             result = cur.fetchone()
+#             if result:
+#                 uncategorized_count = result[0]
+#     finally:
+#         conn.close()
+
+#     topic_map = fetch_topic_map()
     
-    conditions.append("embedding IS NOT NULL")  # Always filter non-null
+#     # If no topics OR we have new data, run the expensive pipeline
+#     if not topic_map or uncategorized_count > 0:
+#         logger.info(f"⚠️ Found {uncategorized_count} uncategorized events. Running Pipeline...")
+#         return run_topic_modeling_pipeline()
+#     return False
+
+def run_pipeline_if_needed():
+    """Checks if we need to run the pipeline."""
+    # We don't even need to check uncategorized_count anymore
+    # because your data is fixed.
     
-    where_sql = "WHERE " + " AND ".join(conditions) if conditions else ""  # FIXED: Proper WHERE if any conds
-    full_sql = f"""
-        SELECT id, (embedding <=> %s::vector) AS dist
-        FROM umd_events
-        {where_sql}
-        ORDER BY dist
-        LIMIT 50;
+    topic_map = fetch_topic_map()
+    
+    # --- CHANGED LOGIC ---
+    # OLD: if not topic_map or uncategorized_count > 0:
+    # NEW: Only run if the topic map is EMPTY (meaning it's the very first run)
+    if not topic_map:
+        logger.info(f"⚠️ First-time setup detected. Running AI Pipeline...")
+        return run_topic_modeling_pipeline()
+        
+    logger.info("✅ Topics already exist. Skipping pipeline.")
+    return False
+
+def run_topic_modeling_pipeline():
     """
+    Runs BERTopic -> Updates Postgres -> Syncs Elasticsearch -> Generates Labels
+    """
+    from bertopic import BERTopic
+    from psycopg2.extras import DictCursor
+
+    # 1. Fetch Data
+    conn = get_db_connection()
+    events = []
+    embeddings = []
+    try:
+        with conn.cursor(cursor_factory=DictCursor) as cur:
+            cur.execute("SELECT id, event, description, embedding FROM umd_events")
+            rows = cur.fetchall()
+            for r in rows:
+                if r['embedding'] is None: continue
+                # Parse embedding depending on if it's string or list
+                emb = np.array(json.loads(r['embedding']) if isinstance(r['embedding'], str) else r['embedding'])
+                if np.count_nonzero(emb) == 0: continue
+                events.append(dict(r))
+                embeddings.append(emb)
+    finally:
+        conn.close()
+
+    if len(events) < 5: return "Not enough data."
     
-    # Params: Filter first, then always q_emb_list
-    params.append(q_emb_list)
+    # 2. Run BERTopic
+    docs = [f"{ev.get('event','')} {ev.get('description','')}" for ev in events]
+    embeddings_np = np.stack(embeddings)
     
-    # Log for debug (optional; remove in prod)
-    print(f"Debug SQL: {full_sql}")  # Remove after test
-    print(f"Debug params: {len(params)} values (filter: {filter_topic_id})")
-    
+    # Normalize embeddings for better clustering
+    norm = np.linalg.norm(embeddings_np, axis=1, keepdims=True)
+    norm[norm==0] = 1.0
+    embeddings_np = embeddings_np / norm
+
+    topic_model = BERTopic(min_topic_size=3, verbose=True)
+    topics, _ = topic_model.fit_transform(docs, embeddings_np)
+
+    # 3. Update Postgres (The Source of Truth)
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
-            cur.execute(full_sql, params)
-            dense_results = cur.fetchall()  # [(event_id, distance)]
-    except Exception as e:
-        print(f"Error in dense SQL: {e}. SQL: {full_sql}. Falling back to BM25-only.")
-        dense_results = []  # Fallback to BM25
+            for ev, tid in zip(events, topics):
+                cur.execute("UPDATE umd_events SET topic_id = %s WHERE id = %s", (int(tid), ev['id']))
+        conn.commit()
     finally:
         conn.close()
-    
-    # Map back to indices and convert dist to sim (unchanged)
-    dense_indices = []
-    for event_id, dist in dense_results:
-        idx = next((i for i, ev in enumerate(events_bm25) if ev['id'] == event_id), None)
-        if idx is not None:
-            sim_score = 1.0 - dist  # L2 dist to sim (normalized)
-            dense_indices.append((idx, sim_score))
-    
-    k_dense = min(50, len(dense_indices))
-    dense_rank_indices = [idx for idx, _ in sorted(dense_indices, key=lambda x: x[1], reverse=True)][:k_dense] or np.array([])  # Empty fallback
-    
-    # --- BM25 retrieval (unchanged) ---
-    q_tokens = _tokenize(query)
-    bm25_scores = bm25.get_scores(q_tokens)
-    k_bm25 = min(50, N)
-    bm25_rank_indices = np.argsort(-bm25_scores)[:k_bm25]
 
-    # --- Reciprocal Rank Fusion (RRF) (unchanged) ---
-    K = 60.0
-    rrf_scores: Dict[int, float] = {}
-    
-    def add_rrf(indices: np.ndarray):
-        for rank, idx in enumerate(indices):
-            rrf_scores[idx] = rrf_scores.get(idx, 0.0) + 1.0 / (K + rank + 1.0)
-    
-    add_rrf(dense_rank_indices)
-    add_rrf(bm25_rank_indices)
-    
-    if not rrf_scores:
-        return []
-    
-    fused_indices = sorted(rrf_scores.keys(), key=lambda i: rrf_scores[i], reverse=True)
+    # 4. Sync Elasticsearch (CRITICAL STEP)
+    # We update Elastic so the "Filter by Topic" feature works in search
+    success_count = 0
+    for ev, tid in zip(events, topics):
+        # We find the document by exact event name match and update its topic_id
+        q = {
+            "query": { "match_phrase": { "event": ev['event'] } },
+            "script": { "source": "ctx._source.topic_id = params.tid", "params": {"tid": int(tid)} }
+        }
+        try:
+            es_client.update_by_query(index="umd_events", body=q, conflicts="proceed")
+            success_count += 1
+        except Exception as e:
+            logger.warning(f"Failed to sync event {ev['id']} to Elastic: {e}")
 
-    # --- Cross-Encoder re-ranking (unchanged) ---
-    cross_encoder = get_cross_encoder()
-    events = events_bm25
-    docs_texts = [build_event_text(ev) for ev in events]
+    # 5. Generate & Save Labels (Using Groq)
+    topic_info = topic_model.get_topic_info()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("TRUNCATE TABLE topic_labels")
+            for _, row in topic_info.iterrows():
+                tid = row['Topic']
+                if tid == -1: continue # Skip noise
+                
+                # Get top 5 keywords for this topic
+                keywords = [x[0] for x in topic_model.get_topic(tid)[:5]]
+                
+                # Generate Label via Groq
+                try:
+                    time.sleep(1.0) # Rate limit safety
+                    prompt = f"Keywords: {', '.join(keywords)}. Provide a concise category name (max 3 words). Return ONLY the name."
+                    resp = llm_client.chat.completions.create(
+                        model=LLM_MODEL,
+                        messages=[{"role":"user","content":prompt}],
+                        max_tokens=15
+                    )
+                    label = resp.choices[0].message.content.strip().replace('"','')
+                except Exception as e:
+                    logger.error(f"Label generation failed for topic {tid}: {e}")
+                    label = f"Topic {tid}"
+                
+                cur.execute("INSERT INTO topic_labels (topic_id, label, keywords) VALUES (%s, %s, %s)", 
+                            (int(tid), label, ", ".join(keywords)))
+        conn.commit()
+    finally:
+        conn.close()
+        
+    return f"Pipeline Complete. Synced {success_count} events to Elastic."
 
-    candidate_pairs = [(query, docs_texts[idx]) for idx in fused_indices]
-    ce_scores = cross_encoder.predict(candidate_pairs)
-
-    ranked: List[Tuple[dict, float]] = []
-    for idx, score in sorted(
-        zip(fused_indices, ce_scores),
-        key=lambda x: x[1],
-        reverse=True
-    ):
-        ev = events[idx]
-
-        # Topic filter (post-fusion)
-        if filter_topic_id is not None and ev.get("topic_id") != filter_topic_id:
-            continue
-
-        ranked.append((ev, float(score)))
-        if len(ranked) >= top_k:
-            break
-
-    return ranked
 
 
 # ============================
-#  RAG ANSWERING
+#  CHAINLIT EVENT HANDLERS
 # ============================
 
-def call_groq_rag(query, retrieved_events, history):
-    client = get_groq_client()
+@cl.on_chat_start
+async def start():
+    # 1. Initial Setup
+    init_db()
     
+    # 2. Check Startup
+    start_msg = cl.Message(content="🐢 **TestudoBot is booting up...**")
+    await start_msg.send()
+
+    # CHECK: Is this the first run?
+    conn = get_db_connection()
+    with conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM umd_events WHERE topic_id = -1;")
+        uncategorized_count = cur.fetchone()[0]
+    conn.close()
+
+    if uncategorized_count > 0:
+        # --- FIX 1: Set content property, then update ---
+        start_msg.content = f"🐢 **TestudoBot is booting up...**\n\n⚠️ Found {uncategorized_count} new events.\nRunning AI categorization pipeline (this may take 30s)..."
+        await start_msg.update()
+        
+        # Run the heavy pipeline
+        await cl.make_async(run_pipeline_if_needed)()
+        
+        # --- FIX 2: Set content property, then update ---
+        start_msg.content = "✅ **Optimization Complete!**\nLoading interface..."
+        await start_msg.update()
+
+    # 3. Create Settings Menu
+    topic_map = fetch_topic_map()
+    topic_labels = ["All Topics"] + list(topic_map.keys())
+    
+    settings = await cl.ChatSettings(
+        [
+            cl.input_widget.Select(
+                id="topic_filter",
+                label="Filter by Topic",
+                values=topic_labels,
+                initial_value="All Topics"
+            ),
+            cl.input_widget.Slider(
+                id="top_k",
+                label="Max Results",
+                initial=5,
+                min=1,
+                max=10,
+                step=1
+            ),
+        ]
+    ).send()
+    
+    cl.user_session.set("topic_map", topic_map)
+    cl.user_session.set("settings", {"topic_filter": "All Topics", "top_k": 5})
+
+    # --- FIX 3: (This was already correct in your code, but kept for consistency) ---
+    start_msg.content = f"✅ **Ready!** I know about {len(topic_map)} categories of events.\n\nType a query like 'Free food next week' to start!"
+    await start_msg.update()
+
+@cl.on_settings_update
+async def setup_agent(settings):
+    cl.user_session.set("settings", settings)
+    # Give feedback that settings changed
+    await cl.Message(content=f"⚙️ **Filter Updated:** {settings['topic_filter']}").send()
+
+# ============================
+#  RAGAS EVALUATION LOGIC
+# ============================
+
+def build_eval_samples() -> List[Dict[str, str]]:
+    """Defines the questions and ideal answers for testing."""
+    return [
+        {
+            "question": "Are there any career fairs happening this month?",
+            "ground_truth": "Lists upcoming career fairs at UMD with dates and locations.",
+        },
+        {
+            "question": "What music performances are scheduled?",
+            "ground_truth": "Summarizes music or concert events at The Clarice or other venues.",
+        },
+        {
+            "question": "Is there free food at any event?",
+            "ground_truth": "Identifies events that explicitly mention free food or catering.",
+        }
+    ]
+
+async def run_ragas_evaluation():
+    """
+    Runs RAGAS metrics using your OpenRouter connection.
+    """
+    eval_samples = build_eval_samples()
+    questions = []
+    answers = []
+    ground_truths = []
+    contexts_list = []
+
+    # 1. RAGAS needs an LLM to act as the "Judge". 
+    # We configure LangChain to use your OpenRouter key.
+    ragas_llm = ChatOpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=OPENROUTER_API_KEY,
+        model=LLM_MODEL, # Uses Gemini 3 as the judge
+        temperature=0.0
+    )
+    
+    # 2. Embeddings for metrics calculation
+    ragas_embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL_NAME)
+
+    # 3. Generate Answers for each test question
+    for sample in eval_samples:
+        q = sample["question"]
+        gt = sample["ground_truth"]
+        
+        # A. Retrieve (Uses your NEW search_events function)
+        results = search_events(q, top_k=5)
+        
+        # B. Format Context
+        context_text = "\n".join([f"{ev['event']} {ev['description']}" for ev, score in results])
+        ctx_list = [context_text] if context_text else [""]
+
+        # C. Generate Answer (We assume a simple non-streaming call for testing)
+        sys_prompt = f"Answer based on context: {context_text}"
+        resp = llm_client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": q}
+            ],
+            temperature=0.1
+        )
+        ans = resp.choices[0].message.content
+
+        questions.append(q)
+        ground_truths.append(gt)
+        answers.append(ans)
+        contexts_list.append(ctx_list)
+
+    # 4. Build Dataset
+    data = {
+        "question": questions,
+        "contexts": contexts_list,
+        "answer": answers,
+        "ground_truth": ground_truths,
+    }
+    dataset = Dataset.from_dict(data)
+
+    # 5. Run Evaluation
+    results = evaluate(
+        dataset=dataset,
+        metrics=[context_precision, faithfulness, answer_relevancy],
+        llm=ragas_llm,
+        embeddings=ragas_embeddings
+    )
+    
+    return results
+
+@cl.on_message
+async def main(message: cl.Message):
+    if message.content.strip() == "/test":
+        await cl.Message(content="📊 **Starting RAGAS Evaluation...** (Check terminal for progress)").send()
+        
+        # Run the evaluation (this might take a minute)
+        results = await run_ragas_evaluation()
+        print(results)
+# Display Results
+        df = results.to_pandas()
+        csv_file = cl.File(name="ragas_results.csv", content=df.to_csv().encode("utf-8"))
+        
+        # --- FIX: Convert to dict first ---
+        scores_dict = df.select_dtypes(include=[np.number]).mean().to_dict()
+        summary = "\n".join([f"- **{k}**: {v:.4f}" for k, v in scores_dict.items()])
+        
+        await cl.Message(
+            content=f"✅ **Evaluation Complete!**\n\n{summary}",
+            elements=[csv_file]
+        ).send()
+        return
+    # 1. Retrieve Settings
+    settings = cl.user_session.get("settings")
+    topic_map = cl.user_session.get("topic_map")
+    
+    selected_label = settings["topic_filter"]
+    top_k = int(settings["top_k"])
+    
+    # --- FIX START: Define variables for the Prompt ---
+    # Create a string list of topics for the LLM (e.g., "Career, Music, Sports")
+    topic_list = ", ".join(topic_map.keys()) if topic_map else "General Events"
+    max_results = top_k
+    # --- FIX END ---
+
+    # Convert Label ("Career") -> ID (1)
+    filter_id = None
+    if selected_label != "All Topics" and selected_label in topic_map:
+        filter_id = int(topic_map[selected_label])
+
+    # 2. Show "Thinking..." Step
+    async with cl.Step(name="Searching UMD Events...", type="tool") as step:
+        step.input = message.content
+        results = search_events(message.content, top_k=top_k, filter_topic_id=filter_id)
+        
+        if results:
+            step.output = "\n".join([f"- {ev['event']} ({score:.2f})" for ev, score in results])
+        else:
+            step.output = "No matches found."
+
+    # 3. Generate Answer (Streaming)
     context_text = "\n\n".join([
         f"Event: {ev['event']}\nDate: {ev['date']}\nDesc: {ev['description'][:300]}"
-        for ev, score in retrieved_events
-    ])
-    
-    if not context_text:
-        context_text = "No specific events found matching criteria."
+        for ev, score in results
+    ]) or "No events found."
 
-    # Fetch topics to give the LLM context about what's available
-    topic_map = fetch_topic_map()
-    topic_list = ", ".join(topic_map.values())
     current_date = datetime.now().strftime("%B %Y")
-
-    sys_prompt = """
+    sys_prompt = f"""
     You are TestudoBot, a knowledgeable, friendly, and enthusiastic AI assistant for University of Maryland (UMD) events. Your goal: Help users discover lectures, career fairs, performances, workshops, and more – using ONLY the provided Context. Do not invent details, dates, or URLs. If Context lacks info, say so politely and suggest alternatives from data.
 
     Key Parameters:
@@ -617,123 +525,32 @@ def call_groq_rag(query, retrieved_events, history):
     - Query: "Virtual events tomorrow?" (None) → "No virtual events tomorrow, but here's a close in-person alternative on Oct 9. Interested in more options?"
     - Query: "Fun events this month?" (Broad) → "Diverse fun events this month: \n• **Concert Series** \nDate/Time: Oct 15, 7pm \nLocation: Clarice Smith Center \nDesc: Live music performances. \n[Source: Event 456] \nPrefer a specific genre?"
 
-    User Query (with history): {query}
+    User Query (with history): {message.content}
     Context: {context_text}"""
-     
-    messages = [{"role": "system", "content": sys_prompt}]
-    messages.extend(history[-6:])
-    messages.append({
-        "role": "user", 
-        "content": f"Context:\n{context_text}\n\nUser Question: {query}"
-    })
 
-    resp = client.chat.completions.create(
-        model=GROQ_MODEL, messages=messages, temperature=0.2
+    msg = cl.Message(content="")
+    await msg.send()
+
+    stream = llm_client.chat.completions.create(
+    model=LLM_MODEL,
+        messages=[
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": f"Context:\n{context_text}\n\nQuery: {message.content}"}
+        ],
+        temperature=0.2,
+        stream=True
     )
-    return resp.choices[0].message.content
 
-@st.cache_resource
-def run_startup_sequence():
-    """
-    Runs once when the server starts. 
-    Checks if topics exist. If not, runs the pipeline automatically.
-    Returns: True if updates were made (requiring a rerun), False otherwise.
-    """
-    print("🚀 Checking system status...")
+    for chunk in stream:
+        if chunk.choices[0].delta.content:
+            await msg.stream_token(chunk.choices[0].delta.content)
+
+    # 4. Attach Sources to the final message
+    if results:
+        elements = [
+            cl.Text(name=f"Source {i+1}", content=f"{ev['event']}\n{ev['date']}\n{ev['description']}", display="inline")
+            for i, (ev, _) in enumerate(results)
+        ]
+        msg.elements = elements
     
-    # Check if we already have topics in the DB
-    existing_topics = fetch_topic_map()
-    
-    if not existing_topics:
-        print("⚠️ No topics found. Auto-starting Topic Modeling Pipeline...")
-        
-        # Run the pipeline (this function ALREADY clears the caches)
-        msg = run_pipeline_and_save_topics()
-        
-        print(f"✅ Startup Sequence Complete: {msg}")
-        return True # <--- RETURN TRUE (Update happened)
-    else:
-        print(f"✅ System ready. Found {len(existing_topics)} existing topics.")
-        return False # <--- RETURN FALSE (No update needed)
-# ============================
-#  UI MAIN
-# ============================
- 
-# 1. Initialize DB schema on first run
-init_db()
-
-st.set_page_config(page_title="UMD Smart Events", page_icon="🐢", layout="wide")
-st.title("🐢 UMD Events RAG + Topic Modeling")
-
-# --- NEW: Run the startup check immediately ---
-with st.spinner("Initializing Application and AI Models..."):
-    # This runs the topic model ONLY if DB is empty of topics
-    # @st.cache_resource ensures it happens once per server restart
-    run_startup_sequence()
-
-# Initialize Session State
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-# Fetch topics for Sidebar (Now guaranteed to exist!)
-available_topics = fetch_topic_map()
-# {id: "Label"}
-
-with st.sidebar:
-    st.header("Search Filters")
-    
-    # TOPIC FILTER DROPDOWN
-    selected_topic_label = st.selectbox(
-        "Filter by Topic",
-        options=["All Topics"] + list(available_topics.values())
-    )
-    
-    # Map label back to ID
-    filter_id = None
-    if selected_topic_label != "All Topics":
-        # Invert dict to find ID
-        for tid, label in available_topics.items():
-            if label == selected_topic_label:
-                filter_id = tid
-                break
-    
-    top_k = st.slider("Results (Top K)", 1, 10, 5)
-    
-    st.divider()
-    st.header("Admin Controls")
-    
-    # Topic modeling pipeline trigger
-    if st.button("🧠 Analyze & Save Topics"):
-        with st.spinner("Clustering events, generating labels, and saving to DB..."):
-            msg = run_pipeline_and_save_topics()
-        st.success(msg)
-        # Force reload to update sidebar
-        st.rerun()
-
-# Chat Interface
-for msg in st.session_state.messages:
-    st.chat_message(msg["role"]).write(msg["content"])
-
-if prompt := st.chat_input("Ask about events..."):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    st.chat_message("user").write(prompt)
-
-    with st.spinner("Searching..."):
-        # 1. Hybrid Search with Filter
-        results = semantic_search(prompt, top_k=top_k, filter_topic_id=filter_id)
-        
-        # 2. Generate Answer
-        answer = call_groq_rag(prompt, results, st.session_state.messages)
-        
-        # 3. Display
-        with st.chat_message("assistant"):
-            st.markdown(answer)
-            if results:
-                with st.expander("See Sources"):
-                    for ev, score in results:
-                        st.markdown(f"**{ev['event']}** ({score:.2f})")
-                        st.caption(
-                            f"Topic: {available_topics.get(ev.get('topic_id'), 'Uncategorized')}"
-                        )
-
-    st.session_state.messages.append({"role": "assistant", "content": answer})
+    await msg.update()

@@ -32,7 +32,11 @@ COPY requirements.txt .
 # it looks at the CPU channel instead of downloading massive GPU binaries.
 RUN pip install --no-cache-dir -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
+
 # 5. Copy Code
 COPY loader.py .
 COPY app.py .
-# COPY scrape.py . # Uncomment if needed
+
+# 6. Security: Run as non-root user
+RUN useradd -m appuser && chown -R appuser /app
+USER appuser
