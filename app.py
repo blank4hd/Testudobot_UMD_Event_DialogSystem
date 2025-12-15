@@ -486,7 +486,7 @@ async def run_ragas_evaluation():
     # 5. Run Evaluation
     results = evaluate(
         dataset=dataset,
-        metrics=[context_precision, faithfulness, answer_relevancy],
+        metrics=[context_precision, context_recall, faithfulness, answer_relevancy],
         llm=ragas_llm,
         embeddings=ragas_embeddings
     )
