@@ -163,7 +163,9 @@ The system includes a `/test` command within the chat interface to run evaluatio
 
 - **Faithfulness:** 1.0000 (No hallucinations in generated answers).
 
-- **Answer Relevancy:** ~0.66 (Relevance of the answer to the query).
+- **Answer Relevancy:** 0.6618 (Relevance of the answer to the query).
+
+- **Recall:** 0.662
 
 ## 🛠 Troubleshooting
 
