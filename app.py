@@ -120,7 +120,7 @@ def init_db():
             logger.info("✅ Database initialized.")
     except Exception as e:
         logger.error(f"❌ DB Init Error: {e}")
-        # removed unsafe conn.rollback() here
+    
 
 def fetch_topic_map() -> Dict[str, str]:
     """Returns { 'Career': '1', 'Music': '2' } for the dropdown."""

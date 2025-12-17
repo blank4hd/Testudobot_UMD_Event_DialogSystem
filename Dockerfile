@@ -26,10 +26,6 @@ RUN pip install --no-cache-dir torch==2.5.0 --index-url https://download.pytorch
 # 4. Install Requirements
 COPY requirements.txt .
 
-# CRITICAL CHANGE: 
-# Removed "--no-deps" so pip installs sub-dependencies (fixes pytz/dateutil error).
-# Added "--extra-index-url" so if any package tries to update torch/numpy, 
-# it looks at the CPU channel instead of downloading massive GPU binaries.
 RUN pip install --no-cache-dir -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
 
