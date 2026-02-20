@@ -12,7 +12,7 @@ The system scrapes the official UMD events calendar, indexes events using hybrid
 
 ## ✨ Key Features
 
-- **Hybrid Retrieval:** Combines **Elasticsearch** keyword search (BM25) with **dense vector search** (MiniLM-L6-v2 embeddings) to capture both exact matches and semantic intent.
+- **Hybrid Retrieval:** Combines **Elasticsearch** keyword search (BM25) with **dense vector search** (all-mpnet-base-v2 embeddings) to capture both exact matches and semantic intent.
 
 - **Grounded RAG:** Generates answers strictly from retrieved event contexts. The system is time-aware, allowing it to interpret relative queries like "events this weekend" or "career fairs tomorrow".
 
@@ -28,14 +28,12 @@ The project follows a microservices architecture orchestrated via Docker Compose
 
 1. **Data Ingestion (`scrape.py`)**: Scrapes event data (title, date, time, location, description) from `calendar.umd.edu`.
 2. **Storage Layer**:
-
    - **PostgreSQL (`pgvector`)**: Stores structured event metadata and high-dimensional vector embeddings.
 
    - **Elasticsearch**: Indexes text and vectors for high-performance hybrid search.
 
 3. **Application Logic (`app.py`)**:
-
-   - Connects to the LLM provider via **OpenRouter** (supporting models like Gemini Pro or Llama 3).
+   - Connects to the LLM provider via **Groq** (supporting low-latency Llama 3.x models).
    - Handles query processing, retrieval ranking, and response generation.
 
 4. **Loader Service (`loader.py`)**: An initialization service that automatically populates the databases from the scraped JSON data upon startup.
@@ -49,7 +47,7 @@ _Figure 1: Data Pipeline - From scraping the UMD calendar to generating embeddin
 flowchart LR
     A[UMD Calendar Website] -->|Scrape| B(scrape.py)
     B -->|Raw Text| C{Preprocessing}
-    C -->|Generate Embeddings| D[SentenceTransformer MiniLM]
+    C -->|Generate Embeddings| D[SentenceTransformer all-mpnet-base-v2]
     C -->|Cluster Topics| E[BERTopic]
     D & E -->|Store Metadata + Vectors| F[(PostgreSQL / pgvector)]
     D & E -->|Index Text + Vectors| G[(Elasticsearch)]
@@ -68,7 +66,7 @@ flowchart TD
     Filter -- No --> ES["Elasticsearch Hybrid Search"]
 
     ES -->|Retrieve Top-K| Rerank["Cross-Encoder Re-ranking"]
-    Rerank -->|Context| LLM["LLM (OpenRouter/Gemini)"]
+    Rerank -->|Context| LLM["LLM (Groq/Llama)"]
 
     subgraph "Prompt Engineering"
     Date["Current Date Injection"] --> LLM
@@ -86,7 +84,7 @@ Follow these steps to replicate and run the system locally.
 
 - **Docker** and **Docker Compose** installed on your machine.
 - **Git** for cloning the repository.
-- An API key from **OpenRouter** (for LLM access).
+- An API key from **Groq** (for LLM access).
 
 ### Step 1: Clone the Repository
 
@@ -98,11 +96,11 @@ cd UMD_Event_DialogSystem
 
 ### Step 2: Configure Environment Variables
 
-Create a `.env` file in the root directory. You must add your OpenRouter API key.
+Create a `.env` file in the root directory. You must add your Groq API key (from https://console.groq.com).
 
 ```bash
 # .env file
-OPENROUTER_API_KEY=your_actual_api_key_here
+GROQ_API_KEY=your_actual_api_key_here
 
 # Optional: Override defaults if needed
 DB_NAME=umd_events
@@ -170,5 +168,5 @@ The system includes a `/test` command within the chat interface to run evaluatio
 ## 🛠 Troubleshooting
 
 - **Database Connection Errors:** Ensure the `db` service is "healthy" before the app tries to connect. The `docker-compose.yaml` includes a health check for this purpose.
-- **Missing API Key:** If the chat does not respond, verify that `OPENROUTER_API_KEY` is set correctly in your `.env` file.
+- **Missing API Key:** If the chat does not respond, verify that `GROQ_API_KEY` is set correctly in your `.env` file.
 - **Dependencies:** If running locally without Docker, ensure you install the "Missing Dependencies Fix" listed in `requirements.txt` (specifically `python-dateutil` and `pytz`).

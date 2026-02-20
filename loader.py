@@ -94,7 +94,7 @@ def setup_elasticsearch(es):
                 "topic_id": {"type": "integer"},
                 "embedding": {
                     "type": "dense_vector",
-                    "dims": 384,                 # Must match MiniLM dimension
+                    "dims": 768,
                     "index": True,
                     "similarity": "cosine"
                 }
@@ -119,8 +119,8 @@ def load_data(events):
         return
 
     # --- 1. Compute Embeddings (ONCE for both DBs) ---
-    print_flush("🔄 Loading embedding model (all-MiniLM-L6-v2)...")
-    model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+    print_flush("🔄 Loading embedding model (all-mpnet-base-v2)...")
+    model = SentenceTransformer("sentence-transformers/all-mpnet-base-v2")
     
     print_flush("🔄 Computing embeddings...")
     # Clean text to avoid newlines breaking things
@@ -158,7 +158,7 @@ def load_data(events):
                 location TEXT,
                 description TEXT,
                 topic_id INTEGER DEFAULT -1,
-                embedding VECTOR(384)
+                embedding VECTOR(768)
             );
         """)
     except Exception as e:

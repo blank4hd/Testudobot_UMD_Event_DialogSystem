@@ -1,6 +1,6 @@
 services:
   db:
-    image: pgvector/pgvector:pg16  # <-- CHANGED: pgvector-enabled image (includes extension)
+    image: pgvector/pgvector:pg16 # <-- CHANGED: pgvector-enabled image (includes extension)
     container_name: umd_events_db
     environment:
       POSTGRES_DB: umd_events
@@ -22,7 +22,7 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"  # Limit RAM
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m" # Limit RAM
     ports:
       - "9200:9200"
     healthcheck:
@@ -36,7 +36,7 @@ services:
     container_name: umd_events_loader
     depends_on:
       db:
-        condition: service_healthy  # <-- ADDED: Wait for DB health
+        condition: service_healthy # <-- ADDED: Wait for DB health
     environment:
       POSTGRES_DB: umd_events
       POSTGRES_USER: umd_user
@@ -45,35 +45,36 @@ services:
       POSTGRES_PORT: "5432"
       EVENTS_JSON_NAME: "umd_calendar_2025-10-01_to_2025-10-31.json"
     volumes:
-      - .:/app  # Mount for JSON file access
+      - .:/app # Mount for JSON file access
     command: ["python", "loader.py"]
-    restart: "no"  # Run once to load data
+    restart: "no" # Run once to load data
 
   app:
-      build: .
-      container_name: umd_events_app
-      depends_on:
-        loader:
-          condition: service_completed_successfully
-        db:
-          condition: service_healthy
-        elasticsearch:
-          condition: service_healthy # Wait for ES too
-      env_file:
-        - .env
-      environment:
-        DB_NAME: umd_events
-        DB_USER: umd_user
-        DB_PASSWORD: umd_password
-        DB_HOST: db
-        ELASTIC_HOST: "http://elasticsearch:9200" # Explicitly define this
-        OPENROUTER_API_KEY: ${OPENROUTER_API_KEY} # Pass this through!
-        EMBEDDING_MODEL_NAME: "sentence-transformers/all-MiniLM-L6-v2"
-      volumes:
-        - .:/app
-      command: ["chainlit", "run", "app.py", "--host", "0.0.0.0", "--port", "8501", "-w"]
-      ports:
-        - "8501:8501"
+    build: .
+    container_name: umd_events_app
+    depends_on:
+      loader:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy # Wait for ES too
+    env_file:
+      - .env
+    environment:
+      DB_NAME: umd_events
+      DB_USER: umd_user
+      DB_PASSWORD: umd_password
+      DB_HOST: db
+      ELASTIC_HOST: "http://elasticsearch:9200" # Explicitly define this
+      GROQ_API_KEY: ${GROQ_API_KEY} # Pass this through!
+      EMBEDDING_MODEL_NAME: "sentence-transformers/all-mpnet-base-v2"
+    volumes:
+      - .:/app
+    command:
+      ["chainlit", "run", "app.py", "--host", "0.0.0.0", "--port", "8501", "-w"]
+    ports:
+      - "8501:8501"
 
 volumes:
-  db_data:  # Persists DB data across restarts
+  db_data: # Persists DB data across restarts

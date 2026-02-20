@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import List, Dict
 import numpy as np 
 import psycopg2
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 from psycopg2 import pool
 from elasticsearch import Elasticsearch
 from dotenv import load_dotenv
@@ -46,26 +46,22 @@ DB_USER = os.getenv("DB_USER", "umd_user")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "umd_password")
 DB_HOST = os.getenv("DB_HOST", "db")
 ELASTIC_HOST = os.getenv("ELASTIC_HOST", "http://elasticsearch:9200")
-EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "sentence-transformers/all-mpnet-base-v2")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 # 1. Model for simple tasks (Topic Labeling) - Faster & Cheaper
-LABEL_MODEL = "meta-llama/llama-3.1-8b-instruct"
+LABEL_MODEL = "llama-3.1-8b-instant"
 
 # 2. Model for complex tasks (Chat & RAG) - Smarter & More Detailed
-CHAT_MODEL = "meta-llama/llama-3.1-70b-instruct"
-SITE_URL = os.getenv("OR_SITE_URL", "http://localhost:8501")
-SITE_NAME = os.getenv("OR_SITE_NAME", "TestudoBot")
+CHAT_MODEL = "llama-3.3-70b-versatile"
+LLM_MODEL = "llama-3.3-70b-versatile"
 
 # --- GLOBAL CLIENTS ---
 es_client = Elasticsearch(ELASTIC_HOST)
 embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME)
+cross_encoder = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
 llm_client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=OPENROUTER_API_KEY,
-    default_headers={
-        "HTTP-Referer": SITE_URL,
-        "X-Title": SITE_NAME,
-    }
+    base_url="https://api.groq.com/openai/v1",
+    api_key=GROQ_API_KEY,
 )
 
 # ============================
@@ -105,7 +101,7 @@ def init_db():
         with get_db_cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
             cur.execute("ALTER TABLE umd_events ADD COLUMN IF NOT EXISTS topic_id INTEGER DEFAULT -1;")
-            cur.execute("ALTER TABLE umd_events ADD COLUMN IF NOT EXISTS embedding VECTOR(384);")
+            cur.execute("ALTER TABLE umd_events ADD COLUMN IF NOT EXISTS embedding VECTOR(768);")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS topic_labels (
                     topic_id INTEGER PRIMARY KEY,
@@ -149,6 +145,42 @@ def fetch_topic_map() -> Dict[str, str]:
 # ------------------------------------------------------------------
  
 
+def expand_query(user_query: str) -> str:
+    """Uses a fast LLM to rewrite user input into an optimized search query."""
+    try:
+        system_prompt = """You are a search query optimizer for a university events database.
+Given a user's natural language question, rewrite it into a concise search query
+that captures the key intent. Extract the core topic/event type the user is looking for.
+
+Rules:
+- Return ONLY the optimized search query, nothing else
+- Remove conversational filler words (hey, can you, I want, please, etc.)
+- Keep important keywords: event types, topics, locations, dates
+- If the query mentions relative dates like "this weekend" or "tomorrow", keep those as-is
+- Keep it under 10 words
+
+Examples:
+User: "hey is there anything fun happening this weekend?" -> "entertainment social events this weekend"
+User: "I'm looking for career related stuff" -> "career fairs job workshops"
+User: "any free food events on campus?" -> "free food events campus"
+User: "what music concerts are coming up?" -> "music concerts performances upcoming"""  # noqa: E501
+
+        resp = llm_client.chat.completions.create(
+            model=LABEL_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_query}
+            ],
+            temperature=0.0,
+            max_tokens=30,
+        )
+        expanded = (resp.choices[0].message.content or "").strip()
+        return expanded if expanded else user_query
+    except Exception as e:
+        logger.warning(f"Query expansion failed, using original query: {e}")
+        return user_query
+
+
 import re
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
@@ -157,6 +189,8 @@ def search_events(
     query_text: str,
     top_k: int = 15,
     filter_topic_id: int | None = None,
+    vector_weight: float = 0.6,
+    keyword_weight: float = 0.4,
 ) -> list[tuple[dict, float]]:
     """
     ULTIMATE HYBRID SEARCH (Fixed for 'Upcoming' Events):
@@ -287,18 +321,40 @@ def search_events(
     def rrf_score(rank: int, k: int = 60) -> float:
         return 1.0 / (k + rank)
 
+    # Vector search is weighted higher (0.6) because semantic similarity captures
+    # user intent better than exact keyword matching for natural language queries,
+    # while keyword search still helps with exact event name matches.
     fused = {} 
     for r, hit in enumerate(v_res):
         _id = hit["_id"]
         if _id not in fused: fused[_id] = {"doc": hit["_source"], "score": 0.0}
-        fused[_id]["score"] += rrf_score(r)
+        fused[_id]["score"] += vector_weight * rrf_score(r)
 
     for r, hit in enumerate(k_res):
         _id = hit["_id"]
         if _id not in fused: fused[_id] = {"doc": hit["_source"], "score": 0.0}
-        fused[_id]["score"] += rrf_score(r)
+        fused[_id]["score"] += keyword_weight * rrf_score(r)
 
     ranked = sorted(fused.values(), key=lambda x: x["score"], reverse=True)[:top_k]
+
+    try:
+        if ranked:
+            pairs = []
+            for item in ranked:
+                doc = item.get("doc", {})
+                title = doc.get("event", "") or ""
+                description = doc.get("description", "") or ""
+                document_text = f"{title} {description}".strip()
+                pairs.append([query_text, document_text])
+
+            ce_scores = cross_encoder.predict(pairs)
+            for item, ce_score in zip(ranked, ce_scores):
+                item["score"] = float(ce_score)
+
+            ranked = sorted(ranked, key=lambda x: x["score"], reverse=True)[:top_k]
+    except Exception as e:
+        logger.warning(f"Cross-encoder reranking failed; falling back to RRF ranking: {e}")
+
     return [(item["doc"], item["score"]) for item in ranked]
 # --- PIPELINE & ADMIN TASKS ---
 
@@ -514,8 +570,8 @@ async def run_ragas_evaluation():
     contexts_list = []
 
     ragas_llm = ChatOpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=OPENROUTER_API_KEY,
+        base_url="https://api.groq.com/openai/v1",
+        api_key=GROQ_API_KEY,
         model=LLM_MODEL,
         temperature=0.0
     )
@@ -577,13 +633,16 @@ async def main(message: cl.Message):
     top_k = int(settings.get("top_k", 5))
     max_results = top_k
     topic_list = ", ".join(topic_map.keys()) if topic_map else "General Events"
+    original_query = message.content
+    expanded_query = expand_query(original_query)
+    logger.info(f"🔍 Query expanded: '{original_query}' -> '{expanded_query}'")
 
     filter_id = int(topic_map[selected_label]) if (selected_label != "All Topics" and selected_label in topic_map) else None
 
     # Search
     async with cl.Step(name="Searching UMD Events...", type="tool") as step:
-        step.input = message.content
-        results = search_events(message.content, top_k=top_k, filter_topic_id=filter_id)
+        step.input = original_query
+        results = search_events(expanded_query, top_k=top_k, filter_topic_id=filter_id)
         if results:
             step.output = "\n".join([f"- {ev.get('event','Unknown')} ({score:.2f})" for ev, score in results])
         else:
@@ -626,7 +685,7 @@ async def main(message: cl.Message):
     - Query: "Virtual events tomorrow?" (None) → "No virtual events tomorrow, but here's a close in-person alternative on Oct 9. Interested in more options?"
     - Query: "Fun events this month?" (Broad) → "Diverse fun events this month: \n• **Concert Series** \nDate/Time: Oct 15, 7pm \nLocation: Clarice Smith Center \nDesc: Live music performances. \n[Source: Event 456] \nPrefer a specific genre?"
 
-    User Query (with history): {message.content}
+    User Query (with history): {original_query}
     Context: {context_text}"""
 
     msg = cl.Message(content="")
@@ -636,7 +695,7 @@ async def main(message: cl.Message):
         model=CHAT_MODEL,
         messages=[
             {"role": "system", "content": sys_prompt},
-            {"role": "user", "content": f"Context:\n{context_text}\n\nQuery: {message.content}"}
+            {"role": "user", "content": f"Context:\n{context_text}\n\nQuery: {original_query}"}
         ],
         temperature=0.1,
         stream=True
@@ -670,5 +729,5 @@ async def main(message: cl.Message):
     await msg.update()
     
     # Save to history with FULL response
-    history.append({"user": message.content, "bot": full_response}) 
+    history.append({"user": original_query, "bot": full_response}) 
     cl.user_session.set("history", history)
