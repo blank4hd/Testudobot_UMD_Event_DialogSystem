@@ -535,6 +535,7 @@ async def start():
         cl.Action(name="quick_search", value="Career fairs this month", label="💼 Career Fairs"),
         cl.Action(name="quick_search", value="Music performances next week", label="🎵 Music"),
         cl.Action(name="quick_search", value="Sports games this weekend", label="🐢 Sports"),
+        cl.Action(name="quick_search", value="/refresh", label="🔄 Refresh Events"),
     ]
 
     start_msg.content = f"✅ **Ready!** I know about {len(topic_map)} categories of events.\n\nClick a button or type a query to start!"
@@ -613,6 +614,18 @@ async def run_ragas_evaluation():
 
 @cl.on_message
 async def main(message: cl.Message):
+    if message.content.strip() == "/refresh":
+        await cl.Message(content="🔄 **Refreshing events...** This may take a minute.").send()
+        try:
+            from scripts.etl import run_etl_cycle
+            summary = run_etl_cycle()
+            pipeline_result = run_pipeline_if_needed()
+            await cl.Message(content=f"✅ **Refresh complete!**\n{summary}\n🏷️ {pipeline_result}").send()
+        except Exception as e:
+            logger.error(f"ETL refresh failed: {e}")
+            await cl.Message(content=f"❌ **Refresh failed:** {str(e)}").send()
+        return
+
     if message.content.strip() == "/test":
         await cl.Message(content="📊 **Starting RAGAS Evaluation...** (Check terminal)").send()
         results = await run_ragas_evaluation()
