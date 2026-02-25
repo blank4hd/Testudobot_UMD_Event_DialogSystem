@@ -101,7 +101,7 @@ Follow these steps to replicate and run the system locally.
 
 ```bash
 git clone https://github.com/blank4hd/Testudobot_UMD_Event_DialogSystem.git
-cd UMD_Event_DialogSystem
+cd Testudobot_UMD_Event_DialogSystem
 
 ```
 
