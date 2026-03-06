@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.5.0] - 2026-03-05
+
+### Added — Evaluation Pipeline
+
+- **RAGAS evaluation core (`scripts/evaluation.py`)** — New module implementing the full RAGAS evaluation workflow. Defines `EvalSample` dataclass for typed eval samples, `load_eval_samples()` to read from `eval/dataset.json` (with hardcoded fallback), and async `run_ragas_evaluation()` that retrieves context, generates answers, and computes RAGAS metrics (context_precision, context_recall, faithfulness, answer_relevancy). Includes `persist_run()` to save timestamped result JSON files and `summarize_results()` for aggregate metric reporting.
+- **CLI evaluation runner (`scripts/evaluate.py`)** — Standalone CLI script for running RAGAS evaluations end-to-end. Supports `--dataset`, `--tag`, `--output-dir`, `--answer-model`, `--judge-model`, `--top-k`, `--limit`, and `--delay` arguments. Outputs timestamped JSON results to `eval/results/`.
+- **Evaluation comparison tool (`scripts/compare_evals.py`)** — CLI tool to compare two RAGAS run files side-by-side. Shows aggregate metric deltas, config diffs, and per-sample regressions above a configurable `--threshold` (default: 0.10).
+- **LLM-powered eval dataset generator (`scripts/generate_eval_dataset.py`)** — Uses LLM to generate candidate evaluation questions from event data across 10 categories (career, music, sports, food, academic, social, location, temporal, negation, multi-constraint). Supports `--input`, `--output`, `--model`, `--per-category`, and `--delay` CLI args.
+- **Curated evaluation dataset (`eval/dataset.json`)** — 25 hand-reviewed QA samples (v2.0) with event-grounded ground truths across 13 categories (career, music, social, sports, academic, food, location, temporal, negation, culture, staff, performance, wellness).
+- **`/test` chat command (`app.py`)** — Inline RAGAS evaluation from the Chainlit chat UI. Runs a quick smoke check using the shared evaluation pipeline with a small sample set and reports metrics directly in chat.
+- **Smoke test for query expansion (`scripts/smoke_expand_query.py`)** — Unit-style smoke test that validates `expand_query()` success and fallback paths using mocked LLM responses.
+
+### Added — UI Enhancements
+
+- **Quick-action buttons** — Chat start screen now includes preset query buttons: 🍕 Free Food, 💼 Career Fairs, 🎵 Music, 🐢 Sports, and 🔄 Refresh Events for one-click common queries.
+- **Streaming LLM responses** — RAG answers now stream token-by-token using `stream=True` with Groq API and Chainlit's `msg.stream_token()`, improving perceived response latency.
+
+### Added — Evaluation Infrastructure
+
+- **`eval/` directory** — New directory for evaluation artifacts: `dataset.json` (curated samples), `dataset_candidates.json` (LLM-generated candidate placeholder), and `results/` (timestamped RAGAS run outputs).
+- **Baseline evaluation result** — `eval/results/2026-03-06T02-24-25Z_baseline.json` capturing initial RAGAS scores (context_precision: 1.0, context_recall: 0.0, faithfulness: 0.875, answer_relevancy: 0.887) on 5 samples.
+
+---
+
 ## [0.4.0] - 2026-02-25
 
 ### Added — Data Pipeline & Incremental Ingestion

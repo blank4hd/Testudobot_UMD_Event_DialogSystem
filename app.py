@@ -2,7 +2,9 @@
 import os
 import json
 import time
+import asyncio
 import logging
+from pathlib import Path
 import chainlit as cl
 from datetime import datetime
 from typing import List, Dict
@@ -13,8 +15,6 @@ from psycopg2 import pool
 from elasticsearch import Elasticsearch
 from dotenv import load_dotenv
 from openai import OpenAI
-from datasets import Dataset
-from ragas import evaluate
 from dateutil import parser  # ADD: pip install python-dateutil (for date parsing)
 from dateutil.relativedelta import relativedelta
 
@@ -24,15 +24,8 @@ from dateutil.relativedelta import relativedelta # Ensure you installed python-d
 import re
 from dateutil import parser
 from datetime import timedelta
-from ragas.metrics import (
-    context_precision,
-    context_recall,
-    faithfulness,
-    answer_relevancy,
-)
-from langchain_openai import ChatOpenAI
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from contextlib import contextmanager
+from scripts.evaluation import load_eval_samples, run_ragas_evaluation
 
 # --- LOGGING & CONFIG ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -556,60 +549,22 @@ async def setup_agent(settings):
 #  RAGAS EVALUATION LOGIC
 # ============================
 
-def build_eval_samples() -> List[Dict[str, str]]:
-    return [
-        {"question": "Are there any career fairs happening this month?", "ground_truth": "Lists upcoming career fairs at UMD."},
-        {"question": "What music performances are scheduled?", "ground_truth": "Summarizes music or concert events."},
-        {"question": "Is there free food at any event?", "ground_truth": "Identifies events that explicitly mention free food."},
-    ]
+async def run_quick_ragas_evaluation(sample_limit: int = 5):
+    dataset_path = Path("eval/dataset.json")
+    eval_samples = load_eval_samples(dataset_path, sample_limit=sample_limit)
+    if not eval_samples:
+        raise ValueError("No valid evaluation samples found.")
 
-async def run_ragas_evaluation():
-    eval_samples = build_eval_samples()
-    questions = []
-    answers = []
-    ground_truths = []
-    contexts_list = []
-
-    ragas_llm = ChatOpenAI(
-        base_url="https://api.groq.com/openai/v1",
-        api_key=GROQ_API_KEY,
-        model=LLM_MODEL,
-        temperature=0.0
-    )
-    ragas_embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL_NAME)
-
-    for sample in eval_samples:
-        q = sample["question"]
-        gt = sample["ground_truth"]
-        results = search_events(q, top_k=5)
-        context_text = "\n".join([f"{ev.get('event','')} {ev.get('description','')}" for ev, score in results])
-        ctx_list = [context_text] if context_text else [""]
-
-        # Simple generation for evaluation
-        resp = llm_client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[{"role": "user", "content": f"Context: {context_text}\nQuestion: {q}"}],
-            temperature=0.1
-        )
-        ans = resp.choices[0].message.content
-
-        questions.append(q)
-        ground_truths.append(gt)
-        answers.append(ans)
-        contexts_list.append(ctx_list)
-
-    data = {
-        "question": questions,
-        "contexts": contexts_list,
-        "answer": answers,
-        "ground_truth": ground_truths,
-    }
-    
-    return evaluate(
-        dataset=Dataset.from_dict(data),
-        metrics=[context_precision, context_recall, faithfulness, answer_relevancy],
-        llm=ragas_llm,
-        embeddings=ragas_embeddings
+    return await run_ragas_evaluation(
+        eval_samples=eval_samples,
+        search_events_fn=search_events,
+        llm_client=llm_client,
+        answer_model=LLM_MODEL,
+        judge_model=LABEL_MODEL,
+        groq_api_key=GROQ_API_KEY,
+        embedding_model_name=EMBEDDING_MODEL_NAME,
+        top_k=5,
+        per_sample_delay_seconds=2.5,
     )
 
 @cl.on_message
@@ -628,14 +583,27 @@ async def main(message: cl.Message):
 
     if message.content.strip() == "/test":
         await cl.Message(content="📊 **Starting RAGAS Evaluation...** (Check terminal)").send()
-        results = await run_ragas_evaluation()
-        df = results.to_pandas()
-        csv_file = cl.File(name="ragas_results.csv", content=df.to_csv().encode("utf-8"))
-        
-        scores_dict = df.select_dtypes(include=[np.number]).mean().to_dict()
-        summary = "\n".join([f"- **{k}**: {v:.4f}" for k, v in scores_dict.items()])
-        
-        await cl.Message(content=f"✅ **Evaluation Complete!**\n\n{summary}", elements=[csv_file]).send()
+        try:
+            payload = await run_quick_ragas_evaluation(sample_limit=5)
+            results = payload["results"]
+            df = results.to_pandas()
+            csv_file = cl.File(name="ragas_results.csv", content=df.to_csv().encode("utf-8"))
+
+            scores = df.select_dtypes(include=[np.number]).mean().dropna()
+            if scores.empty:
+                await cl.Message(
+                    content="❌ **Evaluation failed:** RAGAS returned no valid numeric scores. Check terminal logs for model/API errors.",
+                    elements=[csv_file],
+                ).send()
+                return
+
+            summary = "\n".join([f"- **{k}**: {v:.4f}" for k, v in scores.to_dict().items()])
+            timing = payload.get("timing", {})
+            time_info = f"\n\n⏱️ **Time:** {timing.get('total_formatted', 'N/A')} (generation {timing.get('generation_formatted', 'N/A')}, RAGAS judging {timing.get('ragas_judging_formatted', 'N/A')})"
+            await cl.Message(content=f"✅ **Evaluation Complete!**\n\n{summary}{time_info}", elements=[csv_file]).send()
+        except Exception as e:
+            logger.exception("RAGAS evaluation failed")
+            await cl.Message(content=f"❌ **Evaluation failed:** {str(e)}").send()
         return
 
     history = cl.user_session.get("history", [])

@@ -1,10 +1,21 @@
 # Roadmap
 
-> Last updated: 2026-02-25
+> Last updated: 2026-03-05
 
 ---
 
 ## ✅ Completed
+
+### Evaluation Pipeline & UI (v0.5.0)
+
+- [x] **CLI-first RAGAS evaluation workflow** — Added `scripts/evaluation.py` (core RAGAS runner with `EvalSample` dataclass, async evaluation, and result persistence) and `scripts/evaluate.py` (CLI runner with `--dataset`, `--tag`, `--limit`, `--delay` args). Results saved as timestamped JSON under `eval/results/`.
+- [x] **Evaluation comparison tool** — Added `scripts/compare_evals.py` to diff two RAGAS runs: shows aggregate metric deltas, config diffs, and per-sample regressions.
+- [x] **LLM-powered eval dataset generator** — Added `scripts/generate_eval_dataset.py` to auto-generate candidate QA pairs from event data across 10 categories.
+- [x] **Curated 25-sample evaluation dataset** — Expanded from 3 hardcoded samples to 25 hand-reviewed, event-grounded QA pairs in `eval/dataset.json` (v2.0) across 13 categories.
+- [x] **`/test` chat command** — Inline RAGAS smoke check from the Chainlit UI using the shared evaluation pipeline.
+- [x] **Smoke test for query expansion** — Added `scripts/smoke_expand_query.py` to validate `expand_query()` success and fallback paths.
+- [x] **Quick-action buttons** — Added preset query buttons (🍕 Free Food, 💼 Career Fairs, 🎵 Music, 🐢 Sports, 🔄 Refresh Events) to the chat start screen.
+- [x] **Streaming LLM responses** — RAG answers now stream token-by-token via Groq API `stream=True` and Chainlit `msg.stream_token()`.
 
 ### Data Pipeline & Incremental Ingestion (v0.4.0)
 
@@ -46,15 +57,15 @@
 
 ### Evaluation & Quality
 
-- [ ] **Expand the RAGAS evaluation set** — Build a diverse evaluation dataset (20–50+ questions) covering multi-day events, location-specific queries, negation, and other edge cases.
-- [ ] **Improve Answer Relevancy score** — Currently at 0.66. Improve through better prompt engineering, context window management, or a stronger generation LLM.
+- [x] **Expand the RAGAS evaluation set** — Built 25-sample curated dataset (v2.0) covering career, music, social, sports, academic, food, location, temporal, negation, culture, staff, performance, and wellness categories.
+- [ ] **Improve Answer Relevancy score** — Improve through better prompt engineering, context window management, or a stronger generation LLM.
 - [ ] **Add automated CI evaluation** — Run RAGAS evaluations automatically on code changes to catch retrieval or generation regressions.
 
 ### Conversational Experience
 
 - [ ] **Multi-turn conversation memory** — Add conversation history to the LLM context to enable follow-ups like "tell me more about that one" or "any others nearby?"
 - [ ] **User preference tracking** — Remember user interests across sessions to personalize event recommendations.
-- [ ] **Streaming responses** — Use streaming from the Groq API to display responses token-by-token in Chainlit, improving perceived latency.
+- [x] **Streaming responses** — Implemented via Groq API `stream=True` and Chainlit `msg.stream_token()` for token-by-token display.
 - [ ] **Better error handling and fallback responses** — When no events match, provide suggestions or ask clarifying questions instead of returning empty results.
 
 ### Infrastructure & DevOps

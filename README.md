@@ -26,9 +26,11 @@ The system scrapes the official UMD events calendar, indexes events using hybrid
 
 - **Topic Modeling:** Uses **BERTopic** to cluster events into semantic categories (e.g., "Music", "Career") and auto-generates topic labels for UI filtering.
 
-- **Conversational Interface:** Built with **Chainlit**, supporting interactive chat, rich source citations (cards with date/location), and topic selection.
+- **Conversational Interface:** Built with **Chainlit**, supporting interactive chat, rich source citations (cards with date/location), topic selection, and **quick-action buttons** for common queries (Free Food, Career Fairs, Music, Sports).
 
-- **Evaluation:** Integrated **RAGAS** metrics (faithfulness, answer relevancy, context precision) to quantitatively assess performance.
+- **Streaming Responses:** LLM answers stream token-by-token via the Groq API, improving perceived response latency.
+
+- **Evaluation:** Integrated **RAGAS** metrics (faithfulness, answer relevancy, context precision, context recall) with a CLI-first evaluation workflow, a curated 25-sample dataset, and tooling for result comparison and dataset generation.
 
 ## 🏗️ System Architecture
 
@@ -180,35 +182,44 @@ docker compose down
 
 ## 📂 Project Structure
 
-| Path                         | Description                                                                                                             |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `app.py`                     | Main application entry point. Handles Chainlit UI, RAG logic, and LLM interaction.                                      |
-| `scripts/loader.py`          | Incrementally upserts event data into PostgreSQL and Elasticsearch with deduplication and stale event cleanup.          |
-| `scripts/etl.py`             | On-demand ETL script: scrapes calendar.umd.edu and upserts events into databases.                                       |
-| `scripts/scrape.py`          | Rolling-range scraper for `calendar.umd.edu` with CLI args, pagination, normalization, and retry logic.                 |
-| `scripts/etl_quick_check.py` | Quick health diagnostics for DB, Elasticsearch, and optional scrape checks.                                             |
-| `data/*.json`                | Seed and scraped event snapshots. ETL writes `umd_events_YYYY-MM-DD.json`; loader reads the newest snapshot by default. |
-| `docs/CHANGELOG.md`          | Versioned changelog of completed improvements.                                                                          |
-| `docs/ROADMAP.md`            | Planned enhancements and delivery priorities.                                                                           |
-| `docker-compose.yaml`        | Orchestrates the multi-container setup (App, DB, Elastic, Loader, ETL).                                                 |
-| `Dockerfile`                 | Defines the Python environment for app and operational scripts.                                                         |
-| `requirements.txt`           | Python dependencies (e.g., `chainlit`, `sentence-transformers`, `elasticsearch`).                                       |
+| Path                               | Description                                                                                                             |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `app.py`                           | Main application entry point. Handles Chainlit UI, RAG logic, and LLM interaction.                                      |
+| `scripts/loader.py`                | Incrementally upserts event data into PostgreSQL and Elasticsearch with deduplication and stale event cleanup.          |
+| `scripts/etl.py`                   | On-demand ETL script: scrapes calendar.umd.edu and upserts events into databases.                                       |
+| `scripts/scrape.py`                | Rolling-range scraper for `calendar.umd.edu` with CLI args, pagination, normalization, and retry logic.                 |
+| `scripts/etl_quick_check.py`       | Quick health diagnostics for DB, Elasticsearch, and optional scrape checks.                                             |
+| `scripts/evaluation.py`            | RAGAS evaluation core: `EvalSample` dataclass, async evaluation runner, result persistence.                             |
+| `scripts/evaluate.py`              | CLI evaluation runner with support for `--dataset`, `--tag`, `--limit`, and other args.                                 |
+| `scripts/compare_evals.py`         | Compares two RAGAS run JSON files: aggregate deltas, config diffs, per-sample regressions.                              |
+| `scripts/generate_eval_dataset.py` | LLM-powered generator for candidate evaluation questions across 10 event categories.                                    |
+| `scripts/smoke_expand_query.py`    | Smoke test for `expand_query()` success and fallback paths.                                                             |
+| `eval/dataset.json`                | Curated evaluation dataset (25 QA samples, v2.0) with event-grounded ground truths.                                     |
+| `eval/results/`                    | Timestamped RAGAS run outputs (JSON) for before/after comparisons.                                                      |
+| `data/*.json`                      | Seed and scraped event snapshots. ETL writes `umd_events_YYYY-MM-DD.json`; loader reads the newest snapshot by default. |
+| `docs/CHANGELOG.md`                | Versioned changelog of completed improvements.                                                                          |
+| `docs/ROADMAP.md`                  | Planned enhancements and delivery priorities.                                                                           |
+| `docker-compose.yaml`              | Orchestrates the multi-container setup (App, DB, Elastic, Loader, ETL).                                                 |
+| `Dockerfile`                       | Defines the Python environment for app and operational scripts.                                                         |
+| `requirements.txt`                 | Python dependencies (e.g., `chainlit`, `sentence-transformers`, `elasticsearch`).                                       |
 
 ## 🧪 Evaluation
 
-The system includes a `/test` command within the chat interface to run evaluation metrics using the **RAGAS** framework. This calculates:
+The project now supports a **CLI-first RAGAS workflow** for repeatable before/after comparisons:
 
-- **Context Precision:** 1.0000 (Perfect retrieval of relevant chunks).
+- **Run full evaluation:** `python3 -m scripts/evaluate.py --tag baseline`
+- **Run on subset:** `python3 -m scripts/evaluate.py --tag quick --limit 10`
+- **Compare two runs:** `python3 scripts/compare_evals.py eval/results/<baseline>.json eval/results/<candidate>.json`
+- **Generate candidate eval questions:** `python3 scripts/generate_eval_dataset.py --input data/umd_events_<Recent_date>.json`
+- **Smoke test query expansion:** `python3 scripts/smoke_expand_query.py`
 
-- **Faithfulness:** 1.0000 (No hallucinations in generated answers).
+Run outputs are saved under `eval/results/` as timestamped JSON files containing config, aggregate metrics, and per-sample scores. The `/test` chat command remains available as a quick smoke check and uses the shared evaluation pipeline with a small sample set.
 
-- **Answer Relevancy:** 0.6618 (Relevance of the answer to the query).
-
-- **Recall:** 0.662
+The curated evaluation dataset (`eval/dataset.json`) contains 25 QA samples across 13 categories with event-grounded ground truths.
 
 ## 🛠 Troubleshooting
 
-- **Quick Infrastructure Diagnostics:** Run `python scripts/etl_quick_check.py` to test Postgres and Elasticsearch connectivity. Add `--scrape-days 1` to include a minimal scrape timing check.
+- **Quick Infrastructure Diagnostics:** Run `python3 scripts/etl_quick_check.py` to test Postgres and Elasticsearch connectivity. Add `--scrape-days 1` to include a minimal scrape timing check.
 - **Database Connection Errors:** Ensure the `db` service is "healthy" before the app tries to connect. The `docker-compose.yaml` includes a health check for this purpose. When running locally, verify that `DB_HOST=localhost` (or `POSTGRES_HOST`) is set in your `.env` file.
 - **Missing API Key:** If the chat does not respond, verify that `GROQ_API_KEY` is set correctly in your `.env` file.
 - **Dependencies:** If running locally without Docker, ensure you install the "Missing Dependencies Fix" listed in `requirements.txt` (specifically `python-dateutil` and `pytz`). The `cloudscraper` package is optional and only used when `--use-cloudscraper` is passed to the scraper.

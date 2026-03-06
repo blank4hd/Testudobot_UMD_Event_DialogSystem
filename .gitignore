@@ -6,3 +6,7 @@ venv
 *.log
 *data
 *.json
+!eval/
+!eval/dataset.json
+!eval/results/
+!eval/results/*.json

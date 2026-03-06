@@ -1,0 +1,74 @@
+{
+  "run_id": "2026-03-06T04-04-26Z_quick",
+  "tag": "quick",
+  "timestamp": "2026-03-06T04:07:10.019924+00:00",
+  "config": {
+    "dataset_path": "eval/dataset.json",
+    "num_samples": 1,
+    "answer_model": "llama-3.3-70b-versatile",
+    "judge_model": "llama-3.1-8b-instant",
+    "top_k": 5,
+    "embedding_model": "sentence-transformers/all-mpnet-base-v2"
+  },
+  "timing": {
+    "total_seconds": 163.62,
+    "generation_seconds": 4.19,
+    "ragas_judging_seconds": 159.42,
+    "avg_sample_seconds": 1.04,
+    "per_sample_seconds": [
+      1.04
+    ],
+    "total_formatted": "2m 43s",
+    "generation_formatted": "4s",
+    "ragas_judging_formatted": "2m 39s"
+  },
+  "aggregate_scores": {
+    "context_precision": 0.9999999999,
+    "context_recall": 1.0,
+    "faithfulness": 1.0,
+    "answer_relevancy": 0.8185116849861883
+  },
+  "per_sample": [
+    {
+      "user_input": "Are there any career fairs happening in March 2026?",
+      "retrieved_contexts": [
+        "Event: 2026 Virtual Spring Career & Internship Fair\nDate: 2026-03-11\nTime: 1:00pm - 4:00pm\nLocation: Location Online Registration Link: Visit the career center event website to register! Visi\nDescription: The University Career Center & The President's Promise are excited to host the virtual 2026 Spring Career & Internship Fair. This virtual networking event offers students, especially recent December graduates, the chance to explore paid full-time and internship opportunities.\n\nDon't miss this exciting opportunity! Join the UCC on Wednesday, March 1",
+        "Event: March 2026 Veteran Networking Event\nDate: 2026-03-26\nTime: 6:00pm - 8:00pm\nLocation: Location GrillMarx CP Located in the lobby of The Hotel, 7777 Baltimore Ave College Park, \nDescription: Grab some food and a drink. Talk to some people. Have a great time. If we never take time, we will never have time. Current Student Veterans and Military-Connected Students, Alumni, Campus Partners, Employers, Veterans, and Veteran Supporters are all welcome. This is your chance to meet other veterans working in your desired industry and employers ",
+        "Event: Career Conversations: Navigating Your Search Beyond the Fair\nDate: 2026-03-24\nTime: 3:00pm - 4:30pm\nLocation: Location Hornbake Library 4130 Campus Drive College Park, MD 20740 Get Directions with Goo\nDescription: The Career Conversations Series aims to help you develop the skills you need to advance your career development journey. The second event in the series, Navigating Your Search Beyond the Fair, will aid you in your search for internships and jobs in the technology field. The UCC@CMNS Advising Team will share UCC resources, show you how to use search",
+        "Event: EnTERPreneur Conference\nDate: 2026-03-06\nTime: 9:00am - 5:30pm\nLocation: Location Samuel Riggs IV Alumni Center 7801 Alumni Dr. College Park, MD 20742 Get Directio\nDescription: The University of Maryland EnTERPreneur Conference is back! Whether you’re starting to explore entrepreneurship, working to strengthen a growing venture, or ready to scale what you’ve built, the EnTERPreneur Conference is designed to meet you where you are and help you take the next step.\n\nExplore. Establish. Expand.\n\nChoose the track that aligns w",
+        "Event: How to Search for an Internship or Job workshop\nDate: 2026-03-30\nTime: 12:00pm - 1:00pm\nLocation: Location Hornbake Library 4130 Campus Drive College Park, MD 20740 Get Directions with Goo\nDescription: In this session, we will discuss:\n\nThis session is your gateway to transforming your career search from daunting to doable. Join us and take the first step towards landing your next opportunity!"
+      ],
+      "response": "Yes, there is a career fair happening in March 2026. The 2026 Virtual Spring Career & Internship Fair will take place on March 11, 2026, from 1:00pm to 4:00pm. It's a virtual event where students can explore paid full-time and internship opportunities. You can register for the event by visiting the career center event website.",
+      "reference": "The 2026 Virtual Spring Career & Internship Fair is on March 11, 2026 from 1:00 to 4:00 PM on the Handshake virtual fair platform, hosted by the University Career Center & The President's Promise.",
+      "context_precision": 0.9999999999,
+      "context_recall": 1.0,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8185116849861883
+    }
+  ],
+  "samples": [
+    {
+      "id": "q001",
+      "question": "Are there any career fairs happening in March 2026?",
+      "ground_truth": "The 2026 Virtual Spring Career & Internship Fair is on March 11, 2026 from 1:00 to 4:00 PM on the Handshake virtual fair platform, hosted by the University Career Center & The President's Promise.",
+      "category": "career",
+      "difficulty": "easy",
+      "tags": [
+        "temporal",
+        "category-filter"
+      ]
+    }
+  ],
+  "answers": [
+    "Yes, there is a career fair happening in March 2026. The 2026 Virtual Spring Career & Internship Fair will take place on March 11, 2026, from 1:00pm to 4:00pm. It's a virtual event where students can explore paid full-time and internship opportunities. You can register for the event by visiting the career center event website."
+  ],
+  "contexts": [
+    [
+      "Event: 2026 Virtual Spring Career & Internship Fair\nDate: 2026-03-11\nTime: 1:00pm - 4:00pm\nLocation: Location Online Registration Link: Visit the career center event website to register! Visi\nDescription: The University Career Center & The President's Promise are excited to host the virtual 2026 Spring Career & Internship Fair. This virtual networking event offers students, especially recent December graduates, the chance to explore paid full-time and internship opportunities.\n\nDon't miss this exciting opportunity! Join the UCC on Wednesday, March 1",
+      "Event: March 2026 Veteran Networking Event\nDate: 2026-03-26\nTime: 6:00pm - 8:00pm\nLocation: Location GrillMarx CP Located in the lobby of The Hotel, 7777 Baltimore Ave College Park, \nDescription: Grab some food and a drink. Talk to some people. Have a great time. If we never take time, we will never have time. Current Student Veterans and Military-Connected Students, Alumni, Campus Partners, Employers, Veterans, and Veteran Supporters are all welcome. This is your chance to meet other veterans working in your desired industry and employers ",
+      "Event: Career Conversations: Navigating Your Search Beyond the Fair\nDate: 2026-03-24\nTime: 3:00pm - 4:30pm\nLocation: Location Hornbake Library 4130 Campus Drive College Park, MD 20740 Get Directions with Goo\nDescription: The Career Conversations Series aims to help you develop the skills you need to advance your career development journey. The second event in the series, Navigating Your Search Beyond the Fair, will aid you in your search for internships and jobs in the technology field. The UCC@CMNS Advising Team will share UCC resources, show you how to use search",
+      "Event: EnTERPreneur Conference\nDate: 2026-03-06\nTime: 9:00am - 5:30pm\nLocation: Location Samuel Riggs IV Alumni Center 7801 Alumni Dr. College Park, MD 20742 Get Directio\nDescription: The University of Maryland EnTERPreneur Conference is back! Whether you’re starting to explore entrepreneurship, working to strengthen a growing venture, or ready to scale what you’ve built, the EnTERPreneur Conference is designed to meet you where you are and help you take the next step.\n\nExplore. Establish. Expand.\n\nChoose the track that aligns w",
+      "Event: How to Search for an Internship or Job workshop\nDate: 2026-03-30\nTime: 12:00pm - 1:00pm\nLocation: Location Hornbake Library 4130 Campus Drive College Park, MD 20740 Get Directions with Goo\nDescription: In this session, we will discuss:\n\nThis session is your gateway to transforming your career search from daunting to doable. Join us and take the first step towards landing your next opportunity!"
+    ]
+  ]
+}

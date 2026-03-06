@@ -1,0 +1,162 @@
+{
+  "run_id": "2026-03-06T02-24-25Z_baseline",
+  "tag": "baseline",
+  "timestamp": "2026-03-06T02:27:39.039401+00:00",
+  "config": {
+    "dataset_path": "eval/dataset.json",
+    "num_samples": 5,
+    "answer_model": "llama-3.3-70b-versatile",
+    "judge_model": "llama-3.1-8b-instant",
+    "top_k": 5,
+    "embedding_model": "sentence-transformers/all-mpnet-base-v2"
+  },
+  "aggregate_scores": {
+    "context_precision": 0.9999999999,
+    "context_recall": 0.0,
+    "faithfulness": 0.875,
+    "answer_relevancy": 0.8866516127458925
+  },
+  "per_sample": [
+    {
+      "user_input": "Are there any career fairs happening this month?",
+      "retrieved_contexts": [
+        "Event: 2026 Virtual Spring Career & Internship Fair\nLocation: Location Online Registration Link: Visit the career center event website to register! Visi\nDescription: The University Career Center & The President's Promise are excited to host the virtual 2026 Spring Career & Internship Fair. This virtual networking event offers students, especially recent December graduates, the chance to explore paid full-time and internship opportunities.\n\nDo\n\nEvent: Career Conversations: Navigating Your Search Beyond the Fair\nLocation: Location Hornbake Library 4130 Campus Drive College Park, MD 20740 Get Directions with Goo\nDescription: The Career Conversations Series aims to help you develop the skills you need to advance your career development journey. The second event in the series, Navigating Your Search Beyond the Fair, will aid you in your search for internships and jobs in the technology field. The UCC@C\n\nEvent: Making the Most of your Summer Without an Internship\nLocation: Location Hornbake Library 4130 Campus Drive College Park, MD 20740 Get Directions with Goo\nDescription: Whether you're looking to build new skills, network, or prepare for your next step, we've got you covered!\n\nDuring this session, you'll discover:\n\nDon't let the absence of an internship hold you back! Embrace the summer as a chance to explore new horizons and prepare for your fut"
+      ],
+      "response": "Yes, there is a career fair happening this month. The 2026 Virtual Spring Career & Internship Fair is taking place, and you can register for it by visiting the career center event website. This virtual event will offer students the chance to explore paid full-time and internship opportunities.",
+      "reference": "Lists upcoming career fairs at UMD with dates and locations.",
+      "context_precision": 0.9999999999,
+      "context_recall": 0.0,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8722506623156187
+    },
+    {
+      "user_input": "What music performances are scheduled?",
+      "retrieved_contexts": [
+        "Event: UMD Wind Ensemble March Concert\nLocation: Location The Clarice Smith Performing Arts Center 8270 Alumni Drive College Park, MD 20742\nDescription: The UMD Wind Ensemble performs its March concert.\n\nEvent: Fearless New Works Festival\nLocation: Location The Clarice Smith Performing Arts Center 8270 Alumni Drive College Park, MD 20742\nDescription: The Fearless New Works Festival is back for a three-day exploration of new dance and theatre performances and works in process from TDPS students. The festival will feature staged readings, choreography presentations and guest speakers. Experience the future of theater and dance \n\nEvent: Fearless New Works Festival\nLocation: Location The Clarice Smith Performing Arts Center 8270 Alumni Drive College Park, MD 20742\nDescription: The Fearless New Works Festival is back for a three-day exploration of new dance and theatre performances and works in process from TDPS students. The festival will feature staged readings, choreography presentations and guest speakers. Experience the future of theater and dance "
+      ],
+      "response": "According to the provided information, there is one music performance scheduled:\n\n1. The UMD Wind Ensemble March Concert at The Clarice Smith Performing Arts Center.",
+      "reference": "Summarizes music or concert events, including dates and locations when available.",
+      "context_precision": 0.9999999999,
+      "context_recall": 0.0,
+      "faithfulness": 0.5,
+      "answer_relevancy": 0.951015434324064
+    },
+    {
+      "user_input": "Is there free food at any event?",
+      "retrieved_contexts": [
+        "Event: Free Iftar and Late Night Study Zone at Stamp\nLocation: Location Adele H. Stamp Student Union 3972 Campus Drive College Park, MD 20742 Get Directi\nDescription: Wednesday, March 11\n\nLocation : Grand Ballroom Lounge, Adele H. Stamp Student Union\n\nDoors Open : 6:30 PM (Sunset/Break Fast at 7:11 PM)\n\nIt's midterms and Spring Break and Eid are right around the corner, and it's time to lock in! This chill iftar will transition to an evening s\n\nEvent: Spring Steps\nLocation: Location McKeldin Mall 7649 Library Lane College Park, MD 20742-7011 Get Directions with G\nDescription: March is Employee Appreciation Month and because we at the Faculty Staff Assistance Program prioritize the Employees of University of Maryland, we have created a month of FREE activities to celebrate you.\n\nPhysical Activity is very important to our overall health.\n\nIf you're inte\n\nEvent: 3rd Annual Big Queer Photo\nLocation: Location McKeldin Mall 7649 Library Lane College Park, MD 20742-7011 Get Directions with G\nDescription: Join the LGBTQ+ Equity Center and the UMD campus community for our 3rd Annual Big Queer Photo (BQP) on Friday, May 1st, from 11:00am-1:00pm on the McKeldin Mall Steps!\n\nThe BQP has become a significant tradition, uniting students, faculty, and staff to underscore our community’s "
+      ],
+      "response": "Yes, there is free food at the \"Free Iftar and Late Night Study Zone at Stamp\" event, specifically an iftar (break fast) meal. The event description mentions \"Free Iftar\" and \"Break Fast at 7:11 PM\", indicating that free food will be provided.",
+      "reference": "Identifies events that explicitly mention free food in their descriptions.",
+      "context_precision": 0.9999999999,
+      "context_recall": 0.0,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8082643439965783
+    },
+    {
+      "user_input": "Any sports games this weekend?",
+      "retrieved_contexts": [
+        "Event: Maryland Baseball v. Michigan\nLocation: Location Bob \"Turtle\" Smith Stadium at Shipley Field\nDescription: N/A\n\nEvent: Maryland Baseball v. Michigan\nLocation: Location Bob \"Turtle\" Smith Stadium at Shipley Field\nDescription: N/A\n\nEvent: Maryland Softball v. Illinois\nLocation: Location Maryland Softball Stadium\nDescription: N/A"
+      ],
+      "response": "Yes, there are sports games this weekend. The Maryland Baseball team is playing against Michigan at Bob \"Turtle\" Smith Stadium at Shipley Field. Additionally, the Maryland Softball team is playing against Illinois at the Maryland Softball Stadium.",
+      "reference": "Lists sports-related events happening during the upcoming weekend.",
+      "context_precision": 0.9999999999,
+      "context_recall": 0.0,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9158635502934795
+    },
+    {
+      "user_input": "Are there events near Stamp Student Union next week?",
+      "retrieved_contexts": [
+        "Event: Free Iftar and Late Night Study Zone at Stamp\nLocation: Location Adele H. Stamp Student Union 3972 Campus Drive College Park, MD 20742 Get Directi\nDescription: Wednesday, March 11\n\nLocation : Grand Ballroom Lounge, Adele H. Stamp Student Union\n\nDoors Open : 6:30 PM (Sunset/Break Fast at 7:11 PM)\n\nIt's midterms and Spring Break and Eid are right around the corner, and it's time to lock in! This chill iftar will transition to an evening s\n\nEvent: Spring Into STAMP's Living Room ft. victhekidd\nLocation: Location Adele H. Stamp Student Union 3972 Campus Drive College Park, MD 20742 Get Directi\nDescription: This week we are excited to welcome ukulele player and singer victhekidd. Come hang out in our \"living room,\" located on the basement level of STAMP.\n\nEvent: 2026 Virtual Spring Career & Internship Fair\nLocation: Location Online Registration Link: Visit the career center event website to register! Visi\nDescription: The University Career Center & The President's Promise are excited to host the virtual 2026 Spring Career & Internship Fair. This virtual networking event offers students, especially recent December graduates, the chance to explore paid full-time and internship opportunities.\n\nDo"
+      ],
+      "response": "Yes, there are events near or at the Adele H. Stamp Student Union next week. \n\n1. On Wednesday, March 11, there is a Free Iftar and Late Night Study Zone event in the Grand Ballroom Lounge, where doors open at 6:30 PM. \n\n2. Another event, Spring Into STAMP's Living Room ft. victhekidd, is also happening at the Adele H. Stamp Student Union, although the specific date is not mentioned. \n\nAdditionally, there is a virtual event, the 2026 Virtual Spring Career & Internship Fair, but it's online and not specifically near the Stamp Student Union.",
+      "reference": "Returns events happening next week with locations at or near Stamp Student Union.",
+      "context_precision": 0.9999999999,
+      "context_recall": 0.0,
+      "faithfulness": 0.875,
+      "answer_relevancy": 0.8858640727997227
+    }
+  ],
+  "samples": [
+    {
+      "id": "q001",
+      "question": "Are there any career fairs happening this month?",
+      "ground_truth": "Lists upcoming career fairs at UMD with dates and locations.",
+      "category": "career",
+      "difficulty": "easy",
+      "tags": [
+        "temporal",
+        "category-filter"
+      ]
+    },
+    {
+      "id": "q002",
+      "question": "What music performances are scheduled?",
+      "ground_truth": "Summarizes music or concert events, including dates and locations when available.",
+      "category": "music",
+      "difficulty": "easy",
+      "tags": [
+        "category-filter"
+      ]
+    },
+    {
+      "id": "q003",
+      "question": "Is there free food at any event?",
+      "ground_truth": "Identifies events that explicitly mention free food in their descriptions.",
+      "category": "food",
+      "difficulty": "medium",
+      "tags": [
+        "keyword-match",
+        "constraint"
+      ]
+    },
+    {
+      "id": "q004",
+      "question": "Any sports games this weekend?",
+      "ground_truth": "Lists sports-related events happening during the upcoming weekend.",
+      "category": "sports",
+      "difficulty": "medium",
+      "tags": [
+        "temporal",
+        "category-filter"
+      ]
+    },
+    {
+      "id": "q005",
+      "question": "Are there events near Stamp Student Union next week?",
+      "ground_truth": "Returns events happening next week with locations at or near Stamp Student Union.",
+      "category": "location",
+      "difficulty": "hard",
+      "tags": [
+        "temporal",
+        "location",
+        "multi-constraint"
+      ]
+    }
+  ],
+  "answers": [
+    "Yes, there is a career fair happening this month. The 2026 Virtual Spring Career & Internship Fair is taking place, and you can register for it by visiting the career center event website. This virtual event will offer students the chance to explore paid full-time and internship opportunities.",
+    "According to the provided information, there is one music performance scheduled:\n\n1. The UMD Wind Ensemble March Concert at The Clarice Smith Performing Arts Center.",
+    "Yes, there is free food at the \"Free Iftar and Late Night Study Zone at Stamp\" event, specifically an iftar (break fast) meal. The event description mentions \"Free Iftar\" and \"Break Fast at 7:11 PM\", indicating that free food will be provided.",
+    "Yes, there are sports games this weekend. The Maryland Baseball team is playing against Michigan at Bob \"Turtle\" Smith Stadium at Shipley Field. Additionally, the Maryland Softball team is playing against Illinois at the Maryland Softball Stadium.",
+    "Yes, there are events near or at the Adele H. Stamp Student Union next week. \n\n1. On Wednesday, March 11, there is a Free Iftar and Late Night Study Zone event in the Grand Ballroom Lounge, where doors open at 6:30 PM. \n\n2. Another event, Spring Into STAMP's Living Room ft. victhekidd, is also happening at the Adele H. Stamp Student Union, although the specific date is not mentioned. \n\nAdditionally, there is a virtual event, the 2026 Virtual Spring Career & Internship Fair, but it's online and not specifically near the Stamp Student Union."
+  ],
+  "contexts": [
+    [
+      "Event: 2026 Virtual Spring Career & Internship Fair\nLocation: Location Online Registration Link: Visit the career center event website to register! Visi\nDescription: The University Career Center & The President's Promise are excited to host the virtual 2026 Spring Career & Internship Fair. This virtual networking event offers students, especially recent December graduates, the chance to explore paid full-time and internship opportunities.\n\nDo\n\nEvent: Career Conversations: Navigating Your Search Beyond the Fair\nLocation: Location Hornbake Library 4130 Campus Drive College Park, MD 20740 Get Directions with Goo\nDescription: The Career Conversations Series aims to help you develop the skills you need to advance your career development journey. The second event in the series, Navigating Your Search Beyond the Fair, will aid you in your search for internships and jobs in the technology field. The UCC@C\n\nEvent: Making the Most of your Summer Without an Internship\nLocation: Location Hornbake Library 4130 Campus Drive College Park, MD 20740 Get Directions with Goo\nDescription: Whether you're looking to build new skills, network, or prepare for your next step, we've got you covered!\n\nDuring this session, you'll discover:\n\nDon't let the absence of an internship hold you back! Embrace the summer as a chance to explore new horizons and prepare for your fut"
+    ],
+    [
+      "Event: UMD Wind Ensemble March Concert\nLocation: Location The Clarice Smith Performing Arts Center 8270 Alumni Drive College Park, MD 20742\nDescription: The UMD Wind Ensemble performs its March concert.\n\nEvent: Fearless New Works Festival\nLocation: Location The Clarice Smith Performing Arts Center 8270 Alumni Drive College Park, MD 20742\nDescription: The Fearless New Works Festival is back for a three-day exploration of new dance and theatre performances and works in process from TDPS students. The festival will feature staged readings, choreography presentations and guest speakers. Experience the future of theater and dance \n\nEvent: Fearless New Works Festival\nLocation: Location The Clarice Smith Performing Arts Center 8270 Alumni Drive College Park, MD 20742\nDescription: The Fearless New Works Festival is back for a three-day exploration of new dance and theatre performances and works in process from TDPS students. The festival will feature staged readings, choreography presentations and guest speakers. Experience the future of theater and dance "
+    ],
+    [
+      "Event: Free Iftar and Late Night Study Zone at Stamp\nLocation: Location Adele H. Stamp Student Union 3972 Campus Drive College Park, MD 20742 Get Directi\nDescription: Wednesday, March 11\n\nLocation : Grand Ballroom Lounge, Adele H. Stamp Student Union\n\nDoors Open : 6:30 PM (Sunset/Break Fast at 7:11 PM)\n\nIt's midterms and Spring Break and Eid are right around the corner, and it's time to lock in! This chill iftar will transition to an evening s\n\nEvent: Spring Steps\nLocation: Location McKeldin Mall 7649 Library Lane College Park, MD 20742-7011 Get Directions with G\nDescription: March is Employee Appreciation Month and because we at the Faculty Staff Assistance Program prioritize the Employees of University of Maryland, we have created a month of FREE activities to celebrate you.\n\nPhysical Activity is very important to our overall health.\n\nIf you're inte\n\nEvent: 3rd Annual Big Queer Photo\nLocation: Location McKeldin Mall 7649 Library Lane College Park, MD 20742-7011 Get Directions with G\nDescription: Join the LGBTQ+ Equity Center and the UMD campus community for our 3rd Annual Big Queer Photo (BQP) on Friday, May 1st, from 11:00am-1:00pm on the McKeldin Mall Steps!\n\nThe BQP has become a significant tradition, uniting students, faculty, and staff to underscore our community’s "
+    ],
+    [
+      "Event: Maryland Baseball v. Michigan\nLocation: Location Bob \"Turtle\" Smith Stadium at Shipley Field\nDescription: N/A\n\nEvent: Maryland Baseball v. Michigan\nLocation: Location Bob \"Turtle\" Smith Stadium at Shipley Field\nDescription: N/A\n\nEvent: Maryland Softball v. Illinois\nLocation: Location Maryland Softball Stadium\nDescription: N/A"
+    ],
+    [
+      "Event: Free Iftar and Late Night Study Zone at Stamp\nLocation: Location Adele H. Stamp Student Union 3972 Campus Drive College Park, MD 20742 Get Directi\nDescription: Wednesday, March 11\n\nLocation : Grand Ballroom Lounge, Adele H. Stamp Student Union\n\nDoors Open : 6:30 PM (Sunset/Break Fast at 7:11 PM)\n\nIt's midterms and Spring Break and Eid are right around the corner, and it's time to lock in! This chill iftar will transition to an evening s\n\nEvent: Spring Into STAMP's Living Room ft. victhekidd\nLocation: Location Adele H. Stamp Student Union 3972 Campus Drive College Park, MD 20742 Get Directi\nDescription: This week we are excited to welcome ukulele player and singer victhekidd. Come hang out in our \"living room,\" located on the basement level of STAMP.\n\nEvent: 2026 Virtual Spring Career & Internship Fair\nLocation: Location Online Registration Link: Visit the career center event website to register! Visi\nDescription: The University Career Center & The President's Promise are excited to host the virtual 2026 Spring Career & Internship Fair. This virtual networking event offers students, especially recent December graduates, the chance to explore paid full-time and internship opportunities.\n\nDo"
+    ]
+  ]
+}

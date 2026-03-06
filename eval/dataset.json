@@ -1,0 +1,208 @@
+{
+  "version": "2.0",
+  "created": "2026-03-05",
+  "source_file": "data/umd_events_2026-03-06.json",
+  "notes": "Ground truths reference actual events from the source data. Each ground_truth contains specific event names, dates, times, and locations so RAGAS can verify recall against retrieved context.",
+  "samples": [
+    {
+      "id": "q001",
+      "question": "Are there any career fairs happening in March 2026?",
+      "ground_truth": "The 2026 Virtual Spring Career & Internship Fair is on March 11, 2026 from 1:00 to 4:00 PM on the Handshake virtual fair platform, hosted by the University Career Center & The President's Promise.",
+      "category": "career",
+      "difficulty": "easy",
+      "tags": ["temporal", "category-filter"]
+    },
+    {
+      "id": "q002",
+      "question": "Are there any interview preparation workshops?",
+      "ground_truth": "How to Prepare for an Interview workshop is on March 6, 2026 from 12:00 to 1:00 PM at Hornbake Library. It covers types of interviews including behavioral-based interviews, researching employers, and developing power stories.",
+      "category": "career",
+      "difficulty": "easy",
+      "tags": ["category-filter"]
+    },
+    {
+      "id": "q003",
+      "question": "What career networking events are available for veterans?",
+      "ground_truth": "The March 2026 Veteran Networking Event is on March 26, 2026 from 6:00 to 8:00 PM at GrillMarx CP located in the lobby of The Hotel. Current student veterans, military-connected students, alumni, and veteran supporters are all welcome.",
+      "category": "career",
+      "difficulty": "medium",
+      "tags": ["category-filter", "audience-specific"]
+    },
+    {
+      "id": "q004",
+      "question": "What music concerts are happening at The Clarice?",
+      "ground_truth": "Baltimore Symphony Orchestra: Mahler's Das Lied von der Erde on March 6, 2026 from 8:00 to 10:00 PM. Richard Goode, piano on March 8, 2026 from 3:00 to 5:00 PM. UMD University Orchestra March Concert on March 10, 2026 at 8:00 PM. UMD Wind Ensemble March Concert on March 11, 2026 at 8:00 PM. All at The Clarice Smith Performing Arts Center.",
+      "category": "music",
+      "difficulty": "medium",
+      "tags": ["location", "category-filter"]
+    },
+    {
+      "id": "q005",
+      "question": "Is there a karaoke event coming up?",
+      "ground_truth": "Global Karaoke Night at the Language House is on March 10, 2026 from 6:00 to 7:30 PM at St. Mary's Hall. It features music from around the world and everyone is welcome to sing in any language.",
+      "category": "social",
+      "difficulty": "easy",
+      "tags": ["keyword-match"]
+    },
+    {
+      "id": "q006",
+      "question": "Are there any open mic nights?",
+      "ground_truth": "Open Mic Night is on March 6, 2026 from 6:30 to 8:00 PM at Ulrich Recital Hall in Tawes Hall. It is hosted by the LGBTQ+ Equity Center and is open to UMD students of all gender identities and sexualities to showcase comedy, music, poetry, and more.",
+      "category": "social",
+      "difficulty": "easy",
+      "tags": ["keyword-match"]
+    },
+    {
+      "id": "q007",
+      "question": "When is the next Maryland softball game?",
+      "ground_truth": "Maryland Softball v. Rutgers is on March 6, 2026 from 6:00 to 8:00 PM at Bob Turtle Smith Stadium at Shipley Field. Additional games against Rutgers are on March 7 at 2:00 PM and March 8 at 12:00 PM.",
+      "category": "sports",
+      "difficulty": "easy",
+      "tags": ["temporal"]
+    },
+    {
+      "id": "q008",
+      "question": "Are there any lacrosse games in March?",
+      "ground_truth": "Women's Lacrosse v. James Madison on March 7 at 12:00 PM. Men's Lacrosse v. Virginia on March 14 at 1:00 PM. Women's Lacrosse v. Penn on March 19 at 8:00 PM. Women's Lacrosse v. USC on March 22 at 12:00 PM. All at Maryland Stadium.",
+      "category": "sports",
+      "difficulty": "medium",
+      "tags": ["temporal", "category-filter"]
+    },
+    {
+      "id": "q009",
+      "question": "What basketball games are coming up?",
+      "ground_truth": "Men's Basketball vs. Illinois is on March 8, 2026 from 3:00 to 6:00 PM at Xfinity Center.",
+      "category": "sports",
+      "difficulty": "easy",
+      "tags": ["category-filter"]
+    },
+    {
+      "id": "q010",
+      "question": "What Python workshops are available?",
+      "ground_truth": "Intro to Python is on March 10, 2026 from 12:00 to 1:00 PM online, for those who have never used Python before. Data Wrangling with Python is on March 6, 2026 from 12:00 to 1:30 PM online, covering Pandas, NumPy, and Seaborn.",
+      "category": "academic",
+      "difficulty": "medium",
+      "tags": ["category-filter"]
+    },
+    {
+      "id": "q011",
+      "question": "Are there any R programming workshops?",
+      "ground_truth": "Data Visualization with R on March 12, 2026 from 12:00 to 1:30 PM online, covering ggplot2, Plotly, and Shiny. Data Mining with R on March 27, 2026 from 12:00 to 1:30 PM online, covering caret, randomForest, glmnet, and xgboost. Linear Regression with R on April 2, 2026 from 12:00 to 1:00 PM online.",
+      "category": "academic",
+      "difficulty": "medium",
+      "tags": ["category-filter"]
+    },
+    {
+      "id": "q012",
+      "question": "Are there any events with free food?",
+      "ground_truth": "Free Iftar and Late Night Study Zone at Stamp on March 11, 2026 from 6:30 PM to 11:59 PM at the Grand Ballroom Lounge, Adele H. Stamp Student Union. Wind Down Wednesday events include free lunch. ChilLACS offers tea and treats on Tuesdays from 2:00 to 4:00 PM at H.J. Patterson Hall.",
+      "category": "food",
+      "difficulty": "medium",
+      "tags": ["keyword-match", "constraint"]
+    },
+    {
+      "id": "q013",
+      "question": "Is there a Ramadan iftar event on campus?",
+      "ground_truth": "Free Iftar and Late Night Study Zone at Stamp on March 11, 2026 at the Grand Ballroom Lounge, Adele H. Stamp Student Union. Doors open at 6:30 PM with sunset and break fast at 7:11 PM. It transitions to a study zone with snacks and drinks until midnight.",
+      "category": "food",
+      "difficulty": "easy",
+      "tags": ["keyword-match"]
+    },
+    {
+      "id": "q014",
+      "question": "What events are happening at Stamp Student Union?",
+      "ground_truth": "Free Iftar and Late Night Study Zone on March 11 at 6:30 PM. Spring Into STAMP's Living Room ft. victhekidd on March 11 from 12:30 to 1:30 PM. Employee Art Day with Studio A on March 18 from 1:00 to 4:00 PM. All at Adele H. Stamp Student Union.",
+      "category": "location",
+      "difficulty": "medium",
+      "tags": ["location"]
+    },
+    {
+      "id": "q015",
+      "question": "What events are at Hornbake Library?",
+      "ground_truth": "How to Prepare for an Interview workshop on March 6 from 12:00 to 1:00 PM. How to Search for an Internship or Job workshop on March 30 from 12:00 to 1:00 PM. Career Conversations: Navigating Your Search Beyond the Fair on March 24 from 3:00 to 4:30 PM. All at Hornbake Library.",
+      "category": "location",
+      "difficulty": "medium",
+      "tags": ["location"]
+    },
+    {
+      "id": "q016",
+      "question": "What events are happening this weekend?",
+      "ground_truth": "On March 7: Women's Lacrosse v. James Madison at 12:00 PM, Macbeth at 2:00 PM and 7:30 PM, Maryland Softball v. Rutgers at 2:00 PM. On March 8: Maryland Softball v. Rutgers at 12:00 PM, Richard Goode piano recital at 3:00 PM, Men's Basketball vs. Illinois at 3:00 PM.",
+      "category": "temporal",
+      "difficulty": "hard",
+      "tags": ["temporal"]
+    },
+    {
+      "id": "q017",
+      "question": "What events are on March 11?",
+      "ground_truth": "2026 Virtual Spring Career & Internship Fair from 1:00 to 4:00 PM. Free Iftar and Late Night Study Zone at 6:30 PM at Stamp. UMD Wind Ensemble March Concert at 8:00 PM. Spring Into STAMP's Living Room ft. victhekidd from 12:30 to 1:30 PM. Mindful Moments Walking Tour from 12:00 to 1:00 PM. Introduction to Zotero from 12:00 to 1:00 PM. Managing Imposter Syndrome wellness workshop from 4:00 to 5:00 PM.",
+      "category": "temporal",
+      "difficulty": "hard",
+      "tags": ["temporal"]
+    },
+    {
+      "id": "q018",
+      "question": "What LGBTQ+ events are happening in March?",
+      "ground_truth": "Open Mic Night on March 6 from 6:30 to 8:00 PM at Tawes Hall. Jam Session with the LGBTQ+ Equity Center on March 9 from 12:00 to 2:00 PM at Marie Mount Hall. Movie Day: Crossing (2024) on March 27 from 2:00 to 4:00 PM. Trans Day of Visibility Community Day on March 31 from 10:00 AM to 4:00 PM at Marie Mount Hall.",
+      "category": "social",
+      "difficulty": "medium",
+      "tags": ["temporal", "category-filter"]
+    },
+    {
+      "id": "q019",
+      "question": "Are there any swimming events at UMD?",
+      "ground_truth": "There are no swimming events listed in the current UMD events calendar.",
+      "category": "negation",
+      "difficulty": "easy",
+      "tags": ["negation"]
+    },
+    {
+      "id": "q020",
+      "question": "What international film screenings are at the Language House?",
+      "ground_truth": "The Twelve Chairs (Russian) on March 10 at 7:30 PM. The Shadow's Edge (Chinese) on March 23 at 6:00 PM. Samba (French) on March 31 at 7:00 PM. A Hero (Persian) on April 6 at 6:00 PM. All screened in the International Film Lounge at St. Mary's Hall.",
+      "category": "culture",
+      "difficulty": "medium",
+      "tags": ["location", "category-filter"]
+    },
+    {
+      "id": "q021",
+      "question": "What Employee Appreciation Month activities are available in March?",
+      "ground_truth": "Intro to Mindfulness 4-week class starting March 2. Spring Steps walking at McKeldin Mall on multiple dates. Employee Art Day with Studio A on March 18 from 1:00 to 4:00 PM at Stamp. Mindful Moments Walking Tour on March 11 and March 25 from 12:00 to 1:00 PM. Employee Fun Day on March 26 from 11:30 AM to 2:30 PM at McKeldin Mall.",
+      "category": "staff",
+      "difficulty": "hard",
+      "tags": ["temporal", "audience-specific"]
+    },
+    {
+      "id": "q022",
+      "question": "Is Macbeth showing at UMD?",
+      "ground_truth": "Yes, Macbeth is showing on March 6 at 7:30 PM, and March 7 at 2:00 PM and 7:30 PM. It is described as a bold retelling of Shakespeare's masterpiece.",
+      "category": "performance",
+      "difficulty": "easy",
+      "tags": ["keyword-match"]
+    },
+    {
+      "id": "q023",
+      "question": "What GIS or mapping workshops are available?",
+      "ground_truth": "Introduction to ArcGIS on March 11, 2026 from 12:00 to 1:00 PM online. Introduction to Open Source GIS-QGIS on April 1, 2026 from 12:00 to 1:00 PM online. Map Tour with Jim on March 12 from 11:00 AM to 12:00 PM at McKeldin Library. AR Sandbox Demo on March 26 from 12:30 to 1:00 PM at STEM Library Makerspace.",
+      "category": "academic",
+      "difficulty": "medium",
+      "tags": ["category-filter"]
+    },
+    {
+      "id": "q024",
+      "question": "Are there any entrepreneurship events?",
+      "ground_truth": "The EnTERPreneur Conference is on March 6, 2026 from 9:00 AM to 5:30 PM at Samuel Riggs IV Alumni Center, with tracks for Explore, Establish, and Expand stages. The xFOUNDRY Mental Health Xperience MiXer on March 11 from 5:30 to 6:30 PM at E.A. Fernandez IDEA Factory.",
+      "category": "career",
+      "difficulty": "medium",
+      "tags": ["category-filter"]
+    },
+    {
+      "id": "q025",
+      "question": "What wellness workshops are available in March?",
+      "ground_truth": "Dealing with Disappointment on March 5 from 4:00 to 5:00 PM. Freedom from Perfectionism on March 3 from 4:00 to 5:00 PM. Pay Attention! Tips to Improve Focus on March 4 from 4:00 to 5:00 PM. Taking Control of Your Thoughts on March 10 from 4:00 to 5:00 PM. Managing Imposter Syndrome on March 11 from 4:00 to 5:00 PM. All online via the Wellness Series.",
+      "category": "wellness",
+      "difficulty": "medium",
+      "tags": ["temporal", "category-filter"]
+    }
+  ]
+}

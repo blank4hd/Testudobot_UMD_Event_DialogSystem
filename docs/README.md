@@ -21,9 +21,14 @@ This folder contains project-level documentation beyond the main setup guide.
 
 ### Key scripts
 
-| Script                       | Purpose                                                                                                                   |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `scripts/scrape.py`          | Rolling-range scraper for `calendar.umd.edu` with CLI args, pagination, and normalization. Exports `scrape_events()` API. |
-| `scripts/loader.py`          | Incremental upsert loader: inserts new events, updates changed, removes stale. Exports `load_data()`.                     |
-| `scripts/etl.py`             | On-demand ETL orchestrator: scrape → load → summary. CLI: `--days N`.                                                     |
-| `scripts/etl_quick_check.py` | Lightweight Postgres/Elasticsearch connectivity diagnostic. CLI: `--scrape-days N`.                                       |
+| Script                             | Purpose                                                                                                                   |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `scripts/scrape.py`                | Rolling-range scraper for `calendar.umd.edu` with CLI args, pagination, and normalization. Exports `scrape_events()` API. |
+| `scripts/loader.py`                | Incremental upsert loader: inserts new events, updates changed, removes stale. Exports `load_data()`.                     |
+| `scripts/etl.py`                   | On-demand ETL orchestrator: scrape → load → summary. CLI: `--days N`.                                                     |
+| `scripts/etl_quick_check.py`       | Lightweight Postgres/Elasticsearch connectivity diagnostic. CLI: `--scrape-days N`.                                       |
+| `scripts/evaluation.py`            | RAGAS evaluation core: `EvalSample` dataclass, async runner, result persistence. Exports `run_ragas_evaluation()`.        |
+| `scripts/evaluate.py`              | CLI evaluation runner: `--dataset`, `--tag`, `--limit`, `--delay`, etc.                                                   |
+| `scripts/compare_evals.py`         | Compares two RAGAS run JSON files: aggregate deltas, config diffs, per-sample regressions.                                |
+| `scripts/generate_eval_dataset.py` | LLM-powered eval question generator across 10 event categories.                                                           |
+| `scripts/smoke_expand_query.py`    | Smoke test for `expand_query()` success and fallback paths.                                                               |
