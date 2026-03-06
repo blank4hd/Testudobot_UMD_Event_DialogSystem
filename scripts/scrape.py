@@ -1,4 +1,5 @@
 import re
+import re as _re
 import time
 import json
 import argparse
@@ -99,20 +100,28 @@ def fetch_soup(url: str, retries: int = MAX_RETRIES) -> BeautifulSoup:
         try:
             r = SESSION.get(url, timeout=30)
 
+            # Handle rate limiting with exponential backoff
+            if r.status_code == 429:
+                retry_after = int(r.headers.get("Retry-After", RETRY_DELAY_SEC * (2 ** attempt)))
+                logger.warning("Rate limited (429) on %s, waiting %ds", url, retry_after)
+                time.sleep(retry_after)
+                continue
+
             if r.status_code == 403 and not url.endswith("/"):
                 retry_url = f"{url}/"
-                logger.info("403 for %s, retrying once with trailing slash", url)
+                logger.info("403 for %s, retrying with trailing slash", url)
                 r = SESSION.get(retry_url, timeout=30)
 
             r.raise_for_status()
             return BeautifulSoup(r.text, "html.parser")
         except requests.RequestException as e:
             if attempt < retries:
+                delay = RETRY_DELAY_SEC * (2 ** (attempt - 1))  # Exponential backoff
                 logger.warning(
                     "Attempt %d/%d failed for %s: %s — retrying in %ds",
-                    attempt, retries, url, e, RETRY_DELAY_SEC,
+                    attempt, retries, url, e, delay,
                 )
-                time.sleep(RETRY_DELAY_SEC)
+                time.sleep(delay)
             else:
                 logger.error("All %d attempts failed for %s: %s", retries, url, e)
                 raise
@@ -481,14 +490,25 @@ def normalize_event(event: dict, range_start: date | None = None, range_end: dat
 
     # --- Date normalization ---
     date_val = normalized.get("date", "")
+    normalized_date = None
     if date_val and date_val != "N/A":
         # Already in YYYY-MM-DD? Keep it.
         if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_val):
             # Range like "Thu Oct 23 - Fri Oct 24" → take first part
             first_part = date_val.split(" - ")[0].strip()
-            parsed = _parse_human_date(first_part, range_start=range_start, range_end=range_end)
-            if parsed:
-                normalized["date"] = parsed
+            normalized_date = _parse_human_date(first_part, range_start=range_start, range_end=range_end)
+
+            # Validate normalized date format
+            if normalized_date and not _re.match(r"\d{4}-\d{2}-\d{2}$", normalized_date):
+                logger.warning(
+                    "Date normalization produced invalid format: %r for event %r",
+                    normalized_date,
+                    normalized.get("event", ""),
+                )
+                normalized_date = None  # Will fall through to original value or "N/A"
+
+            if normalized_date:
+                normalized["date"] = normalized_date
 
     # --- Location: replace N/A / empty with None ---
     loc = normalized.get("location", "")

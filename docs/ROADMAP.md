@@ -1,10 +1,23 @@
 # Roadmap
 
-> Last updated: 2026-03-05
+> Last updated: 2026-03-06
 
 ---
 
 ## ✅ Completed
+
+### Code Review Refactor (v0.6.0)
+
+- [x] **Module split** — Split `app.py` into `db.py` (database), `search.py` (retrieval), `pipeline.py` (topic modeling), and `app.py` (UI handlers only). Each module uses an `init_*()` function to receive shared clients at startup.
+- [x] **System prompt extraction** — Moved the ~50-line inline RAG system prompt f-string into `prompts/rag_system.txt`, loaded at startup via `pathlib` with placeholder variables.
+- [x] **Pytest test suite for date parsing** — Added `tests/test_date_parsing.py` covering `extract_date_range()` for today, tomorrow, this weekend, month names, year rollover, and more.
+- [x] **Input sanitization** — Added `sanitize_user_input()` to truncate queries to 500 chars, strip null bytes, and reject empty input before reaching the LLM or Elasticsearch.
+- [x] **Bulk ES sync in topic pipeline** — Replaced O(n) individual `update_by_query` calls with `elasticsearch.helpers.bulk` for batch topic updates.
+- [x] **Elasticsearch data persistence** — Added `es_data` named volume so the ES index survives `docker compose down`.
+- [x] **Configurable ES heap** — ES heap now configurable via `ES_JAVA_OPTS` env var with `${ES_JAVA_OPTS:--Xms512m -Xmx512m}` syntax.
+- [x] **Localhost-only port binding** — Bound Elasticsearch and Postgres ports to `127.0.0.1` to prevent unauthenticated network access.
+- [x] **Multi-turn conversation history** — Last 3 turns of chat history are now included in the LLM messages array, enabling follow-ups like "tell me more about that one".
+- [x] **Named constants for magic numbers** — Introduced `RRF_K`, `VECTOR_SEARCH_CANDIDATES`, `MIN_TOPIC_SIZE`, `CHAT_TEMPERATURE`, `DESCRIPTION_CONTEXT_LIMIT`, `DESCRIPTION_DISPLAY_LIMIT`, `DEFAULT_TOP_K` to replace inline literals.
 
 ### Evaluation Pipeline & UI (v0.5.0)
 
@@ -54,16 +67,18 @@
 - [ ] **Remove database redundancy** — Consolidate storage: use Elasticsearch as the single search engine for both BM25 and dense vector retrieval, keeping PostgreSQL only for structured metadata (topic labels, admin state).
 - [ ] **Proper date typing** — Convert dates from TEXT/keyword to native DATE types to enable range queries and eliminate regex-based date parsing in `search_events()`.
 - [ ] **Event versioning/history** — Track when events are added, modified, or removed to support queries like "what events were recently added?"
+- [ ] **Complete module separation** — Finish migrating any remaining tightly-coupled logic between `db.py`, `search.py`, `pipeline.py`, and `app.py`.
 
 ### Evaluation & Quality
 
 - [x] **Expand the RAGAS evaluation set** — Built 25-sample curated dataset (v2.0) covering career, music, social, sports, academic, food, location, temporal, negation, culture, staff, performance, and wellness categories.
 - [ ] **Improve Answer Relevancy score** — Improve through better prompt engineering, context window management, or a stronger generation LLM.
 - [ ] **Add automated CI evaluation** — Run RAGAS evaluations automatically on code changes to catch retrieval or generation regressions.
+- [ ] **Expand pytest coverage** — Add unit tests for RRF fusion, cross-encoder reranking, loader upsert/dedup logic, and scraper HTML parsing.
 
 ### Conversational Experience
 
-- [ ] **Multi-turn conversation memory** — Add conversation history to the LLM context to enable follow-ups like "tell me more about that one" or "any others nearby?"
+- [x] **Multi-turn conversation memory** — Last 3 turns of chat history are now passed to the LLM, enabling follow-ups like "tell me more about that one". _(Completed in v0.6.0)_
 - [ ] **User preference tracking** — Remember user interests across sessions to personalize event recommendations.
 - [x] **Streaming responses** — Implemented via Groq API `stream=True` and Chainlit `msg.stream_token()` for token-by-token display.
 - [ ] **Better error handling and fallback responses** — When no events match, provide suggestions or ask clarifying questions instead of returning empty results.
@@ -73,7 +88,7 @@
 - [ ] **Reverse proxy (Nginx/Traefik)** — Add HTTPS termination, rate limiting, and proper routing for production deployment.
 - [ ] **Health monitoring and alerting** — Add application-level health checks, logging aggregation, and alerts for scraping or database failures.
 - [ ] **Environment-based configuration** — Separate dev/staging/production configs instead of relying on a single `.env` file.
-- [ ] **Resource optimization** — Address the 512 MB Elasticsearch heap allocation and the duplicated embedding model loading; consider shared model serving or embedding caching.
+- [ ] **Resource optimization** — Address the 512 MB Elasticsearch heap allocation and the duplicated embedding model loading; consider shared model serving or embedding caching. _(Partial: `loader.py` now reads from `EMBEDDING_MODEL_NAME` env var instead of hardcoding.)_
 
 ### UI/UX Enhancements
 
@@ -85,5 +100,5 @@
 ### Security & Robustness
 
 - [ ] **API key management** — Move from `.env` files to a proper secrets manager (Docker secrets, Vault) for production.
-- [ ] **Input sanitization** — Add guardrails against prompt injection in user queries passed to the LLM.
+- [x] **Input sanitization** — Added `sanitize_user_input()` to truncate, strip null bytes, and reject empty input. _(Completed in v0.6.0)_
 - [ ] **Rate limiting on the chat endpoint** — Prevent abuse of the LLM API quota.

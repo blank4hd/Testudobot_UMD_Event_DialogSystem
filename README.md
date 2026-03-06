@@ -22,7 +22,7 @@ The system scrapes the official UMD events calendar, indexes events using hybrid
 
 - **Hybrid Retrieval:** Combines **Elasticsearch** keyword search (BM25) with **dense vector search** (all-mpnet-base-v2 embeddings) to capture both exact matches and semantic intent.
 
-- **Grounded RAG:** Generates answers strictly from retrieved event contexts. The system is time-aware, allowing it to interpret relative queries like "events this weekend" or "career fairs tomorrow".
+- **Grounded RAG:** Generates answers strictly from retrieved event contexts. The system is time-aware, allowing it to interpret relative queries like "events this weekend" or "career fairs tomorrow". Supports multi-turn conversation — the last 3 turns of chat history are included in the LLM context for follow-ups like "tell me more about that one".
 
 - **Topic Modeling:** Uses **BERTopic** to cluster events into semantic categories (e.g., "Music", "Career") and auto-generates topic labels for UI filtering.
 
@@ -43,6 +43,7 @@ The project follows a microservices architecture orchestrated via Docker Compose
    - **Elasticsearch**: Indexes text and vectors for high-performance hybrid search.
 
 3. **Application Logic (`app.py`)**:
+   - `app.py` now delegates to `db.py` (database), `search.py` (retrieval), and `pipeline.py` (topic modeling).
    - Connects to the LLM provider via **Groq** (supporting low-latency Llama 3.x models).
    - Handles query processing, retrieval ranking, and response generation.
    - Provides a `/refresh` chat command (and quick-action button) to trigger on-demand ETL from within the UI.
@@ -126,6 +127,9 @@ DB_PASSWORD=umd_password
 DB_HOST=localhost
 ELASTIC_HOST=http://localhost:9200
 
+# Optional: Tune Elasticsearch memory (default: 512MB)
+# ES_JAVA_OPTS=-Xms1g -Xmx1g
+
 ```
 
 > **Note:** Inside Docker, `docker-compose.yaml` sets `POSTGRES_HOST=db` and `ELASTIC_HOST=http://elasticsearch:9200` automatically. The `.env` values above are used when running scripts locally (e.g., `python scripts/etl.py`).
@@ -141,7 +145,7 @@ docker compose up --build
 
 **What happens during startup:**
 
-1. **`db` (Postgres)** and **`elasticsearch`** containers start first.
+1. **`db` (Postgres)** and **`elasticsearch`** containers start first. Elasticsearch data now persists across restarts via the `es_data` named volume, so re-indexing only happens on first startup or after explicitly removing the volume.
 2. **`loader`** service waits for the database and Elasticsearch to be healthy, then incrementally upserts event data into Postgres and Elasticsearch.
    - If `EVENTS_JSON_NAME` is set, loader uses that file.
    - Otherwise, loader auto-selects the most recent `data/umd_events_YYYY-MM-DD.json` snapshot.
@@ -182,26 +186,32 @@ docker compose down
 
 ## 📂 Project Structure
 
-| Path                               | Description                                                                                                             |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `app.py`                           | Main application entry point. Handles Chainlit UI, RAG logic, and LLM interaction.                                      |
-| `scripts/loader.py`                | Incrementally upserts event data into PostgreSQL and Elasticsearch with deduplication and stale event cleanup.          |
-| `scripts/etl.py`                   | On-demand ETL script: scrapes calendar.umd.edu and upserts events into databases.                                       |
-| `scripts/scrape.py`                | Rolling-range scraper for `calendar.umd.edu` with CLI args, pagination, normalization, and retry logic.                 |
-| `scripts/etl_quick_check.py`       | Quick health diagnostics for DB, Elasticsearch, and optional scrape checks.                                             |
-| `scripts/evaluation.py`            | RAGAS evaluation core: `EvalSample` dataclass, async evaluation runner, result persistence.                             |
-| `scripts/evaluate.py`              | CLI evaluation runner with support for `--dataset`, `--tag`, `--limit`, and other args.                                 |
-| `scripts/compare_evals.py`         | Compares two RAGAS run JSON files: aggregate deltas, config diffs, per-sample regressions.                              |
-| `scripts/generate_eval_dataset.py` | LLM-powered generator for candidate evaluation questions across 10 event categories.                                    |
-| `scripts/smoke_expand_query.py`    | Smoke test for `expand_query()` success and fallback paths.                                                             |
-| `eval/dataset.json`                | Curated evaluation dataset (25 QA samples, v2.0) with event-grounded ground truths.                                     |
-| `eval/results/`                    | Timestamped RAGAS run outputs (JSON) for before/after comparisons.                                                      |
-| `data/*.json`                      | Seed and scraped event snapshots. ETL writes `umd_events_YYYY-MM-DD.json`; loader reads the newest snapshot by default. |
-| `docs/CHANGELOG.md`                | Versioned changelog of completed improvements.                                                                          |
-| `docs/ROADMAP.md`                  | Planned enhancements and delivery priorities.                                                                           |
-| `docker-compose.yaml`              | Orchestrates the multi-container setup (App, DB, Elastic, Loader, ETL).                                                 |
-| `Dockerfile`                       | Defines the Python environment for app and operational scripts.                                                         |
-| `requirements.txt`                 | Python dependencies (e.g., `chainlit`, `sentence-transformers`, `elasticsearch`).                                       |
+| Path                               | Description                                                                                                                     |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `app.py`                           | Chainlit UI handlers, session management, and top-level wiring. Delegates to `db.py`, `search.py`, and `pipeline.py`.           |
+| `db.py`                            | Database connection pool, cursor helper, schema init, and topic map queries.                                                    |
+| `search.py`                        | Hybrid search engine: query expansion, date extraction, vector + keyword retrieval with RRF fusion and cross-encoder reranking. |
+| `pipeline.py`                      | BERTopic topic modeling pipeline with bulk Elasticsearch sync and AI-generated topic labels.                                    |
+| `prompts/rag_system.txt`           | RAG system prompt template loaded at startup. Uses placeholder variables for date, categories, and context.                     |
+| `scripts/loader.py`                | Incrementally upserts event data into PostgreSQL and Elasticsearch with deduplication and stale event cleanup.                  |
+| `scripts/etl.py`                   | On-demand ETL script: scrapes calendar.umd.edu and upserts events into databases.                                               |
+| `scripts/scrape.py`                | Rolling-range scraper for `calendar.umd.edu` with CLI args, pagination, normalization, and retry logic.                         |
+| `scripts/etl_quick_check.py`       | Quick health diagnostics for DB, Elasticsearch, and optional scrape checks.                                                     |
+| `scripts/evaluation.py`            | RAGAS evaluation core: `EvalSample` dataclass, async evaluation runner, result persistence.                                     |
+| `scripts/evaluate.py`              | CLI evaluation runner with support for `--dataset`, `--tag`, `--limit`, and other args.                                         |
+| `scripts/compare_evals.py`         | Compares two RAGAS run JSON files: aggregate deltas, config diffs, per-sample regressions.                                      |
+| `scripts/generate_eval_dataset.py` | LLM-powered generator for candidate evaluation questions across 10 event categories.                                            |
+| `scripts/smoke_expand_query.py`    | Smoke test for `expand_query()` success and fallback paths.                                                                     |
+| `scripts/__init__.py`              | Package marker for the scripts module.                                                                                          |
+| `tests/test_date_parsing.py`       | Pytest suite covering date extraction logic (today, tomorrow, weekend, month names, year rollover).                             |
+| `eval/dataset.json`                | Curated evaluation dataset (25 QA samples, v2.0) with event-grounded ground truths.                                             |
+| `eval/results/`                    | Timestamped RAGAS run outputs (JSON) for before/after comparisons.                                                              |
+| `data/*.json`                      | Seed and scraped event snapshots. ETL writes `umd_events_YYYY-MM-DD.json`; loader reads the newest snapshot by default.         |
+| `docs/CHANGELOG.md`                | Versioned changelog of completed improvements.                                                                                  |
+| `docs/ROADMAP.md`                  | Planned enhancements and delivery priorities.                                                                                   |
+| `docker-compose.yaml`              | Orchestrates the multi-container setup (App, DB, Elastic, Loader, ETL).                                                         |
+| `Dockerfile`                       | Defines the Python environment for app and operational scripts.                                                                 |
+| `requirements.txt`                 | Python dependencies (e.g., `chainlit`, `sentence-transformers`, `elasticsearch`).                                               |
 
 ## 🧪 Evaluation
 
@@ -217,10 +227,17 @@ Run outputs are saved under `eval/results/` as timestamped JSON files containing
 
 The curated evaluation dataset (`eval/dataset.json`) contains 25 QA samples across 13 categories with event-grounded ground truths.
 
+Run unit tests:
+
+```bash
+pytest tests/
+```
+
 ## 🛠 Troubleshooting
 
 - **Quick Infrastructure Diagnostics:** Run `python3 scripts/etl_quick_check.py` to test Postgres and Elasticsearch connectivity. Add `--scrape-days 1` to include a minimal scrape timing check.
 - **Database Connection Errors:** Ensure the `db` service is "healthy" before the app tries to connect. The `docker-compose.yaml` includes a health check for this purpose. When running locally, verify that `DB_HOST=localhost` (or `POSTGRES_HOST`) is set in your `.env` file.
 - **Missing API Key:** If the chat does not respond, verify that `GROQ_API_KEY` is set correctly in your `.env` file.
+- **Missing GROQ_API_KEY:** The app now validates this at startup and exits with a clear error message pointing to https://console.groq.com. Previously it would fail silently on the first query.
 - **Dependencies:** If running locally without Docker, ensure you install the "Missing Dependencies Fix" listed in `requirements.txt` (specifically `python-dateutil` and `pytz`). The `cloudscraper` package is optional and only used when `--use-cloudscraper` is passed to the scraper.
 - **Stale Data After Restart:** The loader now uses incremental upserts by default (`FORCE_CLEAN_SCHEMA=false`). To force a full reload, set `FORCE_CLEAN_SCHEMA=true` in the loader's environment or `.env` file.

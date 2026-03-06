@@ -2,7 +2,7 @@ import asyncio
 import copy
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
@@ -25,55 +25,33 @@ class EvalSample:
     tags: Optional[List[str]] = None
 
 
-def build_default_eval_samples() -> List[Dict[str, str]]:
-    return [
-        {
-            "id": "default_001",
-            "question": "Are there any career fairs happening this month?",
-            "ground_truth": "Lists upcoming career fairs at UMD.",
-            "category": "career",
-            "difficulty": "easy",
-            "tags": ["temporal", "category-filter"],
-        },
-        {
-            "id": "default_002",
-            "question": "What music performances are scheduled?",
-            "ground_truth": "Summarizes music or concert events.",
-            "category": "music",
-            "difficulty": "easy",
-            "tags": ["category-filter"],
-        },
-        {
-            "id": "default_003",
-            "question": "Is there free food at any event?",
-            "ground_truth": "Identifies events that explicitly mention free food.",
-            "category": "food",
-            "difficulty": "medium",
-            "tags": ["constraint"],
-        },
-    ]
-
-
-def load_eval_samples(dataset_path: Path, sample_limit: Optional[int] = None) -> List[Dict[str, Any]]:
+def load_eval_samples(dataset_path: Path, sample_limit: Optional[int] = None) -> List[EvalSample]:
     if not dataset_path.exists():
-        return build_default_eval_samples()
+        raise FileNotFoundError(
+            f"Evaluation dataset not found at {dataset_path}. "
+            f"Run 'python scripts/generate_eval_dataset.py' to create one."
+        )
 
     with dataset_path.open("r", encoding="utf-8") as file:
         payload = json.load(file)
 
     raw_samples = payload.get("samples", [])
-    samples = []
+    samples: List[EvalSample] = []
     for index, sample in enumerate(raw_samples, start=1):
-        item = {
-            "id": sample.get("id", f"q{index:03d}"),
-            "question": sample.get("question", "").strip(),
-            "ground_truth": sample.get("ground_truth", "").strip(),
-            "category": sample.get("category", "general"),
-            "difficulty": sample.get("difficulty", "medium"),
-            "tags": sample.get("tags", []),
-        }
-        if item["question"] and item["ground_truth"]:
-            samples.append(item)
+        question = sample.get("question", "").strip()
+        ground_truth = sample.get("ground_truth", "").strip()
+        if not question or not ground_truth:
+            continue
+        samples.append(
+            EvalSample(
+                id=sample.get("id", f"q{index:03d}"),
+                question=question,
+                ground_truth=ground_truth,
+                category=sample.get("category", "general"),
+                difficulty=sample.get("difficulty", "medium"),
+                tags=sample.get("tags"),
+            )
+        )
 
     if sample_limit is not None:
         return samples[:sample_limit]
@@ -125,7 +103,7 @@ def _condense_context(results: Sequence[Any], max_context_items: int = 5) -> Lis
 
 
 async def run_ragas_evaluation(
-    eval_samples: List[Dict[str, Any]],
+    eval_samples: List[EvalSample],
     search_events_fn: Callable[..., Sequence[Any]],
     llm_client: Any,
     answer_model: str,
@@ -172,8 +150,8 @@ async def run_ragas_evaluation(
 
     for index, sample in enumerate(eval_samples, start=1):
         sample_start = time.monotonic()
-        question = sample["question"]
-        ground_truth = sample["ground_truth"]
+        question = sample.question
+        ground_truth = sample.ground_truth
 
         if progress_callback:
             if index > 1:
@@ -339,7 +317,7 @@ def persist_run(
         "timing": eval_payload.get("timing", {}),
         "aggregate_scores": summary,
         "per_sample": frame.to_dict(orient="records"),
-        "samples": eval_payload["eval_samples"],
+        "samples": [asdict(sample) for sample in eval_payload["eval_samples"]],
         "answers": eval_payload["answers"],
         "contexts": eval_payload["contexts"],
     }

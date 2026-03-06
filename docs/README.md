@@ -15,7 +15,7 @@ This folder contains project-level documentation beyond the main setup guide.
 
 ## Repository conventions (current)
 
-- [../scripts](../scripts): Operational scripts (`etl`, `etl_quick_check`, loader, scraper, diagnostics).
+- [../scripts](../scripts): Operational scripts (`etl`, `etl_quick_check`, loader, scraper, diagnostics). `app.py` now delegates to `db.py` (database), `search.py` (retrieval), and `pipeline.py` (topic modeling).
 - [../data](../data): Seed/snapshot JSON datasets used by loader and ETL workflows.
 - [../docs](.): Project documentation and planning artifacts.
 
@@ -32,3 +32,4 @@ This folder contains project-level documentation beyond the main setup guide.
 | `scripts/compare_evals.py`         | Compares two RAGAS run JSON files: aggregate deltas, config diffs, per-sample regressions.                                |
 | `scripts/generate_eval_dataset.py` | LLM-powered eval question generator across 10 event categories.                                                           |
 | `scripts/smoke_expand_query.py`    | Smoke test for `expand_query()` success and fallback paths.                                                               |
+| `tests/test_date_parsing.py`       | Pytest suite for date extraction: today, tomorrow, weekend, months, year rollover.                                        |

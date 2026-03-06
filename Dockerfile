@@ -32,6 +32,7 @@ RUN pip install --no-cache-dir -r requirements.txt --extra-index-url https://dow
 # 5. Copy Code
 COPY app.py .
 COPY scripts ./scripts
+COPY prompts ./prompts
 
 # 6. Security: Run as non-root user
 RUN useradd -m appuser && chown -R appuser /app

@@ -18,15 +18,12 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def print_flush(msg):
-    logger.info(msg)
-
 # ============================
 #  DATA LOADING HELPERS
 # ============================
 
 def load_events_from_json(path: str):
-    print_flush(f"🔎 Looking for JSON at: {path}")
+    logger.info("🔎 Looking for JSON at: %s", path)
     if not os.path.isfile(path):
         raise FileNotFoundError(f"JSON file not found at '{path}'")
 
@@ -36,7 +33,7 @@ def load_events_from_json(path: str):
     if not isinstance(data, list):
         raise ValueError("JSON file must contain a list of event objects (list[dict])")
 
-    print_flush(f"✅ Loaded {len(data)} events from JSON.")
+    logger.info("✅ Loaded %s events from JSON.", len(data))
     return data
 
 
@@ -80,10 +77,10 @@ def get_pg_connection_with_retry(max_attempts: int = 20, delay_sec: float = 3.0)
             conn = psycopg2.connect(
                 dbname=dbname, user=user, password=password, host=host, port=port
             )
-            print_flush(f"✅ Connected to Postgres on attempt {attempt}")
+            logger.info("✅ Connected to Postgres on attempt %s", attempt)
             return conn
         except OperationalError:
-            print_flush(f"⏳ Postgres not ready (attempt {attempt}/{max_attempts})...")
+            logger.info("⏳ Postgres not ready (attempt %s/%s)...", attempt, max_attempts)
             time.sleep(delay_sec)
     
     raise Exception("❌ Could not connect to Postgres after multiple attempts.")
@@ -96,12 +93,12 @@ def get_es_client_with_retry(max_attempts: int = 20, delay_sec: float = 5.0):
     for attempt in range(1, max_attempts + 1):
         try:
             if es.ping():
-                print_flush(f"✅ Connected to Elasticsearch on attempt {attempt}")
+                logger.info("✅ Connected to Elasticsearch on attempt %s", attempt)
                 return es
             else:
-                print_flush(f"⏳ Elasticsearch reachable but not ready (attempt {attempt}/{max_attempts})...")
+                logger.info("⏳ Elasticsearch reachable but not ready (attempt %s/%s)...", attempt, max_attempts)
         except Exception as e:
-            print_flush(f"⏳ Elasticsearch not reachable (attempt {attempt}/{max_attempts}): {e}")
+            logger.warning("⏳ Elasticsearch not reachable (attempt %s/%s): %s", attempt, max_attempts, e)
         
         time.sleep(delay_sec)
 
@@ -131,16 +128,16 @@ def setup_elasticsearch(es, recreate: bool = False):
     
     if es.indices.exists(index=index_name):
         if recreate:
-            print_flush("🔄 Recreating ES index...")
+            logger.info("🔄 Recreating ES index...")
             es.indices.delete(index=index_name)
             es.indices.create(index=index_name, body=mapping)
-            print_flush("✅ Elasticsearch index 'umd_events' recreated.")
+            logger.info("✅ Elasticsearch index 'umd_events' recreated.")
         else:
-            print_flush("✅ Elasticsearch index 'umd_events' already exists.")
+            logger.info("✅ Elasticsearch index 'umd_events' already exists.")
         return
 
     es.indices.create(index=index_name, body=mapping)
-    print_flush("✅ Elasticsearch index 'umd_events' created.")
+    logger.info("✅ Elasticsearch index 'umd_events' created.")
 
 
 def compute_event_hash(event: dict) -> str:
@@ -238,7 +235,7 @@ def upsert_events(events: list[dict], embeddings) -> dict:
             else:
                 summary["skipped"] += 1
         except Exception as e:
-            print_flush(f"❌ Upsert failed for event {i+1}: {e}")
+            logger.error("❌ Upsert failed for event %s: %s", i + 1, e, exc_info=True)
             summary["skipped"] += 1
 
     if actions:
@@ -273,7 +270,7 @@ def remove_stale_events(current_event_hashes: set[str]) -> int:
         ]
         helpers.bulk(es, delete_actions, raise_on_error=False)
 
-    print_flush(f"🧹 Removed {stale_removed} stale events.")
+    logger.info("🧹 Removed %s stale events.", stale_removed)
     cur.close()
     conn.close()
     return stale_removed
@@ -287,25 +284,26 @@ def load_data(events: list[dict] | None = None):
         base_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(base_dir)
         json_path = resolve_events_json_path(project_root)
-        print_flush(f"📂 Loading events from: {json_path}")
+        logger.info("📂 Loading events from: %s", json_path)
         events = load_events_from_json(json_path)
 
     if not events:
-        print_flush("❌ No events to load. Exiting.")
+        logger.error("❌ No events to load. Exiting.")
         return {"inserted": 0, "updated": 0, "skipped": 0, "stale_removed": 0}
 
     # --- 1. Compute Embeddings (ONCE for both DBs) ---
-    print_flush("🔄 Loading embedding model (all-mpnet-base-v2)...")
-    model = SentenceTransformer("sentence-transformers/all-mpnet-base-v2")
+    model_name = os.getenv("EMBEDDING_MODEL_NAME", "sentence-transformers/all-mpnet-base-v2")
+    logger.info("🔄 Loading embedding model (%s)...", model_name)
+    model = SentenceTransformer(model_name)
     
-    print_flush("🔄 Computing embeddings...")
+    logger.info("🔄 Computing embeddings...")
     # Clean text to avoid newlines breaking things
     texts = [
         f"{ev.get('event', '')} {ev.get('description', '')} {ev.get('location', '')}".replace("\n", " ").strip() 
         for ev in events
     ]
     embeddings = model.encode(texts, normalize_embeddings=True).astype('float32')
-    print_flush(f"✅ Computed {len(embeddings)} embeddings.")
+    logger.info("✅ Computed %s embeddings.", len(embeddings))
 
     # --- 2. Load into PostgreSQL (Storage & Topics) ---
     conn = get_pg_connection_with_retry()
@@ -313,16 +311,16 @@ def load_data(events: list[dict] | None = None):
     cur = conn.cursor()
 
     # Step A: Check and create pgvector extension
-    print_flush("🔄 Checking pgvector extension...")
+    logger.info("🔄 Checking pgvector extension...")
     try:
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-        print_flush("✅ pgvector extension ensured.")
+        logger.info("✅ pgvector extension ensured.")
     except Exception as e:
-        print_flush(f"❌ pgvector extension failed: {e}")
+        logger.error("❌ pgvector extension failed: %s", e, exc_info=True)
         raise
 
     # Step B: Create Table
-    print_flush("🔄 Ensuring table schema...")
+    logger.info("🔄 Ensuring table schema...")
     try:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS umd_events (
@@ -340,7 +338,7 @@ def load_data(events: list[dict] | None = None):
 
         cur.execute("ALTER TABLE umd_events ADD COLUMN IF NOT EXISTS content_hash TEXT UNIQUE;")
     except Exception as e:
-        print_flush(f"❌ Table creation failed: {e}")
+        logger.error("❌ Table creation failed: %s", e, exc_info=True)
         raise
 
     force_clean_schema = os.getenv("FORCE_CLEAN_SCHEMA", "false").lower() == "true"
@@ -348,29 +346,32 @@ def load_data(events: list[dict] | None = None):
     # Step C: Optional Clean Slate
     if force_clean_schema:
         cur.execute("TRUNCATE TABLE umd_events RESTART IDENTITY;")
-        print_flush("🗑️ Cleared existing Postgres data.")
+        logger.info("🗑️ Cleared existing Postgres data.")
 
     # Step E: Create Index (Postgres)
     try:
         cur.execute("CREATE INDEX IF NOT EXISTS umd_events_embedding_idx ON umd_events USING hnsw (embedding vector_cosine_ops);")
-        print_flush("🗂️ Postgres HNSW index created.")
+        logger.info("🗂️ Postgres HNSW index created.")
     except Exception as e:
-        print_flush(f"⚠️ Postgres index creation warning: {e}")
+        logger.warning("⚠️ Postgres index creation warning: %s", e)
 
     cur.close()
     conn.close()
 
     # --- 3. Load into Elasticsearch (Search Engine) ---
-    print_flush("🔄 Connecting to Elasticsearch...")
+    logger.info("🔄 Connecting to Elasticsearch...")
     es = get_es_client_with_retry()
     setup_elasticsearch(es, recreate=force_clean_schema)
 
     summary = upsert_events(events, embeddings)
     current_hashes = {compute_event_hash(ev) for ev in events}
     stale_removed = remove_stale_events(current_hashes)
-    print_flush(
-        f"✅ Loader complete: {summary['inserted']} inserted, {summary['updated']} updated, "
-        f"{summary['skipped']} skipped, {stale_removed} stale removed"
+    logger.info(
+        "✅ Loader complete: %s inserted, %s updated, %s skipped, %s stale removed",
+        summary['inserted'],
+        summary['updated'],
+        summary['skipped'],
+        stale_removed,
     )
     return {
         "inserted": summary["inserted"],
@@ -383,7 +384,7 @@ def main():
     try:
         load_data()
     except Exception as e:
-        print_flush(f"❌ FATAL ERROR: {e}")
+        logger.error("❌ FATAL ERROR: %s", e, exc_info=True)
         sys.exit(1)
 
 if __name__ == "__main__":

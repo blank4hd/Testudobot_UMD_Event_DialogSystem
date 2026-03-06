@@ -44,17 +44,17 @@ def _save_scrape_snapshot(events: list[dict], scraped_date: date) -> str:
 def _scrape_with_retry(start_date: str, end_date: str) -> list[dict]:
     try:
         return scrape_events(start_date, end_date)
-    except requests.RequestException as exc:
-        logger.error("❌ Scrape failed on first attempt: %s", exc)
+    except requests.RequestException:
+        logger.exception("❌ Scrape failed on first attempt")
         logger.info("⏳ Retrying scrape in 60 seconds...")
         time.sleep(60)
         try:
             return scrape_events(start_date, end_date)
         except requests.RequestException as retry_exc:
-            logger.error("❌ Scrape failed on retry: %s", retry_exc)
+            logger.exception("❌ Scrape failed on retry")
             raise RuntimeError("Scraping failed after retry") from retry_exc
     except Exception as exc:
-        logger.error("❌ Scrape failed: %s", exc)
+        logger.exception("❌ Scrape failed")
         raise RuntimeError("Scraping failed") from exc
 
 
@@ -80,7 +80,7 @@ def run_etl_cycle(days_ahead: int | None = None) -> str:
     try:
         load_summary = load_data(events) or {}
     except Exception as exc:
-        logger.error("❌ Loader failed: %s", exc)
+        logger.exception("❌ Loader failed")
         raise RuntimeError("Loading failed") from exc
 
     inserted = int(load_summary.get("inserted", 0))
@@ -120,6 +120,6 @@ if __name__ == "__main__":
     try:
         summary = run_etl_cycle(days_ahead=args.days)
         logger.info(summary)
-    except Exception as exc:
-        logger.exception("❌ ETL cycle failed: %s", exc)
+    except Exception:
+        logger.exception("❌ ETL cycle failed")
         sys.exit(1)

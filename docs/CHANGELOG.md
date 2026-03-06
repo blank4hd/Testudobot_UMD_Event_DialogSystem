@@ -6,6 +6,64 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.6.0] - 2026-03-06
+
+### Added — Code Architecture
+
+- **Module split (`app.py` → `db.py`, `search.py`, `pipeline.py`)** — Split monolithic `app.py` into 4 focused modules: `db.py` (connection pool, cursor helper, `init_db`, `fetch_topic_map`), `search.py` (query expansion, date extraction, hybrid search), `pipeline.py` (topic modeling pipeline with bulk ES sync), and `app.py` (Chainlit UI handlers only). Each module uses an `init_*()` function to receive shared clients at startup.
+- **RAG system prompt template (`prompts/rag_system.txt`)** — Extracted the ~50-line inline RAG system prompt f-string into a standalone template file loaded at startup via `pathlib`. Uses `{date_str}`, `{current_year}`, `{topic_list}`, `{max_results}`, `{context_text}` placeholders.
+- **Package marker (`scripts/__init__.py`)** — Added explicit package marker for the `scripts` module.
+- **Test directory (`tests/`)** — Added `tests/` directory with `conftest.py` and `pytest.ini` for the new pytest suite.
+
+### Added — Search & Date Parsing
+
+- **"Today", "tomorrow", and "this weekend" support** — Date parser now recognizes these temporal phrases, which were previously unrecognized despite the system prompt claiming support.
+- **Year rollover fix for month names** — Querying "January" in December now correctly targets next January instead of the past one.
+- **`extract_date_range()` helper** — New function that parses dates from the original user query before LLM expansion runs, preventing the LLM from rewriting temporal phrases that the date parser depends on. `search_events()` now accepts an `override_date_range` parameter.
+- **Named constants for magic numbers** — Introduced `RRF_K=60`, `VECTOR_SEARCH_CANDIDATES=200`, `MIN_TOPIC_SIZE=3`, `CHAT_TEMPERATURE=0.1`, `DESCRIPTION_CONTEXT_LIMIT=300`, `DESCRIPTION_DISPLAY_LIMIT=350`, `DEFAULT_TOP_K=20` to replace inline literals.
+
+### Added — Security & Input Validation
+
+- **`sanitize_user_input()` function** — Truncates queries to 500 chars, strips null bytes, and rejects empty input before it reaches the LLM or Elasticsearch.
+- **Localhost-only port binding** — Elasticsearch and Postgres ports now bind to `127.0.0.1` only (`127.0.0.1:9200:9200`, `127.0.0.1:5432:5432`) to prevent unauthenticated network access.
+
+### Added — Testing
+
+- **Pytest suite for date parsing (`tests/test_date_parsing.py`)** — Covers `extract_date_range()` for: today, tomorrow, this weekend, this month, next month, upcoming, specific month names, no-date queries, and year rollover.
+
+### Changed — Bug Fixes
+
+- **`top_k` slider/session default mismatch** — The UI slider showed 20 but the session defaulted to 5. Both now default to 20.
+- **Double context injection** — Context was sent in both the system prompt and the user message, doubling token usage. Removed the duplicate from the user message.
+- **Conversation history wired into LLM** — The last 3 turns of chat history are now included in the messages array, enabling multi-turn follow-ups like "tell me more about that one". Previously history was tracked but never sent.
+- **`GROQ_API_KEY` validation at startup** — The app now raises a `RuntimeError` with a helpful message if the key is missing, instead of failing with a confusing error on first API call.
+- **Aggressive filler-word stripping** — The regex no longer corrupts words like "innovation" (stripping "in") or "findings" (stripping "find"). Uses stricter word-boundary matching.
+
+### Changed — Performance
+
+- **Bulk ES sync in topic pipeline** — Replaced O(n) individual `update_by_query` Elasticsearch calls with a bulk update using `elasticsearch.helpers.bulk`. Searches for ES document IDs first, then sends a single batch update.
+
+### Changed — Infrastructure
+
+- **Elasticsearch data persistence** — Added `es_data` named volume so the ES index survives `docker compose down`.
+- **Configurable ES heap** — Made ES heap configurable via `ES_JAVA_OPTS` env var with `${ES_JAVA_OPTS:--Xms512m -Xmx512m}` syntax.
+- **YAML anchor for DB credentials** — Consolidated duplicate DB credentials using a YAML anchor (`x-db-env: &db-env`) referenced by all 4 services.
+
+### Changed — Code Quality
+
+- **Import cleanup in `app.py`** — Removed double imports of `datetime`, `re`, `dateutil.relativedelta`, and unused `dateutil.parser`.
+- **`logger.exception()` adoption** — Replaced f-string exception logging with `logger.exception()` across `app.py`, `scripts/loader.py`, and `scripts/etl.py` to preserve stack traces.
+- **Loader embedding model from env var** — Embedding model name in `scripts/loader.py` now read from `EMBEDDING_MODEL_NAME` env var instead of being hardcoded, matching `app.py` behavior.
+- **`EvalSample` dataclass enforcement** — `load_eval_samples()` now returns `List[EvalSample]` and `run_ragas_evaluation()` accepts it. Dict-based access replaced with attribute access.
+- **Removed `build_default_eval_samples()` fallback** — `load_eval_samples()` now raises `FileNotFoundError` if the dataset file is missing instead of silently falling back to 3 generic samples.
+
+### Changed — Scraper
+
+- **429 rate-limit handling with exponential backoff** — `fetch_soup()` in `scripts/scrape.py` now uses exponential backoff on HTTP 429 responses. Previously all retries used a fixed 5-second delay.
+- **Date format validation after normalization** — Invalid date formats are caught and logged instead of silently breaking downstream ES range filters.
+
+---
+
 ## [0.5.0] - 2026-03-05
 
 ### Added — Evaluation Pipeline
