@@ -29,7 +29,29 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 os.environ['PYTORCH_JIT_LOG_LEVEL'] = '0'
 
-ELASTIC_HOST = os.getenv("ELASTIC_HOST", "http://elasticsearch:9200")
+def resolve_elastic_host() -> str:
+    configured_host = os.getenv("ELASTIC_HOST")
+    candidates = [configured_host] if configured_host else []
+    candidates.extend(["http://localhost:9200", "http://elasticsearch:9200"])
+
+    seen = set()
+    for host in candidates:
+        if not host or host in seen:
+            continue
+        seen.add(host)
+        try:
+            if Elasticsearch(host).ping():
+                logger.info("✅ Using Elasticsearch host: %s", host)
+                return host
+        except Exception:
+            logger.warning("Elasticsearch host not reachable: %s", host)
+
+    fallback = configured_host or "http://localhost:9200"
+    logger.warning("⚠️ Falling back to Elasticsearch host: %s", fallback)
+    return fallback
+
+
+ELASTIC_HOST = resolve_elastic_host()
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "sentence-transformers/all-mpnet-base-v2")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_API_KEY:

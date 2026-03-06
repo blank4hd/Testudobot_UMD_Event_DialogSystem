@@ -150,7 +150,7 @@ def compute_event_hash(event: dict) -> str:
     return hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
 
 
-def upsert_events(events: list[dict], embeddings) -> dict:
+def upsert_events(events: list[dict], embeddings, force_reindex_es: bool = False) -> dict:
     summary = {"inserted": 0, "updated": 0, "skipped": 0}
 
     conn = get_pg_connection_with_retry()
@@ -234,6 +234,13 @@ def upsert_events(events: list[dict], embeddings) -> dict:
                 })
             else:
                 summary["skipped"] += 1
+                if force_reindex_es:
+                    actions.append({
+                        "_op_type": "index",
+                        "_index": "umd_events",
+                        "_id": pg_id,
+                        "_source": source_doc,
+                    })
         except Exception as e:
             logger.error("❌ Upsert failed for event %s: %s", i + 1, e, exc_info=True)
             summary["skipped"] += 1
@@ -363,7 +370,16 @@ def load_data(events: list[dict] | None = None):
     es = get_es_client_with_retry()
     setup_elasticsearch(es, recreate=force_clean_schema)
 
-    summary = upsert_events(events, embeddings)
+    force_reindex_es = False
+    try:
+        es_count = es.count(index="umd_events").get("count", 0)
+        force_reindex_es = es_count == 0
+        if force_reindex_es:
+            logger.info("ℹ️ Elasticsearch index is empty; forcing full reindex from current events.")
+    except Exception as e:
+        logger.warning("⚠️ Could not determine Elasticsearch index count: %s", e)
+
+    summary = upsert_events(events, embeddings, force_reindex_es=force_reindex_es)
     current_hashes = {compute_event_hash(ev) for ev in events}
     stale_removed = remove_stale_events(current_hashes)
     logger.info(
